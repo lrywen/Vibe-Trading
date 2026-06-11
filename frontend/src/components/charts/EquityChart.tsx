@@ -4,6 +4,7 @@ import { getChartTheme } from "@/lib/chart-theme";
 import { abbreviateNum } from "@/lib/formatters";
 import { echarts, CHART_GROUP, connectCharts } from "@/lib/echarts";
 import { useDarkMode } from "@/hooks/useDarkMode";
+import { useTranslation } from "@/lib/i18n";
 
 interface Props {
   data: EquityPoint[];
@@ -13,6 +14,7 @@ interface Props {
 export function EquityChart({ data, height = 300 }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const { dark } = useDarkMode();
+  const { t: tr, lang } = useTranslation();
 
   useEffect(() => {
     if (!ref.current || data.length === 0) return;
@@ -87,13 +89,13 @@ export function EquityChart({ data, height = 300 }: Props) {
           },
         },
         {
-          name: "Drawdown%", type: "line", xAxisIndex: 1, yAxisIndex: 1,
+          name: tr("charts.drawdown"), type: "line", xAxisIndex: 1, yAxisIndex: 1,
           data: drawdown, smooth: false, symbol: "none",
           lineStyle: { color: t.downColor, width: 1 },
           areaStyle: { color: t.downColor + "25" },
           markLine: {
             silent: true, symbol: "none",
-            data: [{ yAxis: minDD, label: { formatter: `Max DD: ${minDD}%`, position: "insideEndTop", fontSize: 10, color: t.downColor } }],
+            data: [{ yAxis: minDD, label: { formatter: `${tr("charts.maxDd")}: ${minDD}%`, position: "insideEndTop", fontSize: 10, color: t.downColor } }],
             lineStyle: { color: t.downColor, type: "dashed", width: 1 },
           },
         },
@@ -103,10 +105,10 @@ export function EquityChart({ data, height = 300 }: Props) {
     const ro = new ResizeObserver(() => chart.resize());
     ro.observe(ref.current!);
     return () => { ro.disconnect(); chart.dispose(); };
-  }, [data, dark]);
+  }, [data, dark, tr, lang]);
 
   if (data.length === 0) {
-    return <div className="text-muted-foreground text-sm p-4">No equity data</div>;
+    return <div className="text-muted-foreground text-sm p-4">{tr("charts.noEquityData")}</div>;
   }
   return <div ref={ref} style={{ height }} />;
 }

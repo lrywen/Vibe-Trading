@@ -53,6 +53,117 @@ logger = logging.getLogger(__name__)
 
 
 # ============================================================================
+# 网络代理分流配置（新增）
+# ============================================================================
+# SOCKS5代理地址（必须使用socks5h协议，DNS解析在远端完成）
+SOCKS5_PROXY = os.environ.get("SOCKS5_PROXY", "socks5h://127.0.0.1:1080")
+
+# 直连超时时间（秒）
+PROXY_TIMEOUT = int(os.environ.get("PROXY_TIMEOUT", "10"))
+
+# 重试间隔（秒），采用阶梯式重试
+PROXY_RETRY_DELAYS = [2, 5, 10]
+
+# 最大重试次数
+MAX_RETRIES = int(os.environ.get("MAX_RETRIES", "2"))
+
+# 境内域名白名单：直接连接，不走代理
+CHINA_DOMAINS = {
+    # 国内云服务商
+    "aliyun.com", "alibaba.com", "baidu.com", "bytedance.net", "douyin.com",
+    "jd.com", "meituan.com", "tencent.com", "qq.com", "weixin.qq.com", "xiaomi.com",
+    # 国内金融数据
+    "eastmoney.com", "10jqka.com.cn", "hexun.com", "sina.com.cn", "sohu.com",
+    # 国内交易所
+    "sse.com.cn", "szse.cn", "cffex.com.cn", "shfe.com.cn", "dce.com.cn", "czce.cn",
+    # 国内CDN和基础服务
+    "cn", "cn.net", "cn.com",
+    # 本地地址
+    "localhost", "127.0.0.1", "0.0.0.0",
+}
+
+# 境外域名清单（强制走代理）
+FOREIGN_DOMAINS = {
+    # 境外交易所
+    "binance.com", "binance.us", "coinbase.com", "kraken.com", "kucoin.com",
+    "gate.io", "huobi.com", "okx.com", "mexc.com", "bybit.com", "bitget.com",
+    "ftx.com", "coinmetro.com",
+    # 境外云服务商
+    "amazonaws.com", "google.com", "googleapis.com", "cloudflare.com",
+    "digitalocean.com", "herokuapp.com",
+    # 境外AI服务
+    "openai.com", "anthropic.com", "gemini.google.com", "groq.com",
+    "together.ai", "huggingface.co",
+    # 境外数据服务
+    "jina.ai", "duckduckgo.com", "serpapi.com", "alphavantage.co",
+    "iexcloud.io", "polygon.io", "coinmarketcap.com", "coingecko.com",
+    # 社交媒体
+    "twitter.com", "x.com", "github.com", "discord.com", "telegram.org",
+}
+
+
+def _is_china_domain(hostname: str) -> bool:
+    """判断是否为境内域名"""
+    if not hostname:
+        return False
+    hostname_lower = hostname.lower().strip(".")
+    for domain in CHINA_DOMAINS:
+        if hostname_lower == domain or hostname_lower.endswith(f".{domain}"):
+            return True
+    # 检查内网IP
+    try:
+        ip = socket.gethostbyname(hostname_lower)
+        if ip.startswith("192.168.") or ip.startswith("10.") or \
+           ip.startswith("172.16.") or ip.startswith("127."):
+            return True
+    except:
+        pass
+    return False
+
+
+def _is_foreign_domain(hostname: str) -> bool:
+    """判断是否为境外域名（强制走代理）"""
+    if not hostname:
+        return False
+    hostname_lower = hostname.lower().strip(".")
+    for domain in FOREIGN_DOMAINS:
+        if hostname_lower == domain or hostname_lower.endswith(f".{domain}"):
+            return True
+    return False
+
+
+def get_proxy_for_url(url: str) -> Optional[str]:
+    """根据URL智能判断是否需要使用代理"""
+    try:
+        from urllib.parse import urlparse
+        parsed = urlparse(url)
+        hostname = parsed.hostname
+        if not hostname:
+            return None
+        # 境内域名：直接连接
+        if _is_china_domain(hostname):
+            logger.debug(f"境内域名，直接连接: {hostname}")
+            return None
+        # 境外域名：强制走代理
+        if _is_foreign_domain(hostname):
+            logger.debug(f"境外域名，使用代理: {hostname}")
+            return SOCKS5_PROXY
+        # 默认：使用代理（保守策略）
+        logger.debug(f"未知域名，默认使用代理: {hostname}")
+        return SOCKS5_PROXY
+    except Exception as e:
+        logger.warning(f"代理判断失败，默认使用代理: {e}")
+        return SOCKS5_PROXY
+
+
+def setup_global_proxy() -> None:
+    """设置全局代理环境变量"""
+    os.environ.setdefault("ALL_PROXY", SOCKS5_PROXY)
+    os.environ.setdefault("all_proxy", SOCKS5_PROXY)
+    logger.info(f"全局代理已配置: {SOCKS5_PROXY}")
+
+
+# ============================================================================
 # Pydantic Models
 # ============================================================================
 
@@ -573,9 +684,15 @@ async def _spa_html_deep_link_fallback(request: Request, call_next):
 @app.on_event("startup")
 async def _run_startup_preflight() -> None:
     """Run preflight checks on server startup."""
-    from src.preflight import run_preflight
+    import asyncio
 
-    run_preflight(console)
+    # Start Gate.io real-time market data client (non-blocking)
+    try:
+        from src.gate_ws_client import start as start_gate_client
+        start_gate_client()
+        console.print("[green][GateWS] Gate.io market data client started[/green]")
+    except Exception as e:
+        console.print(f"[yellow][GateWS] Gate.io client not started: {e}[/yellow]")
 
 
 # ============================================================================
@@ -1559,7 +1676,8 @@ def _get_session_service():
     from src.session.service import SessionService
 
     store = SessionStore(base_dir=SESSIONS_DIR)
-    event_bus = EventBus()
+    sse_timeout = int(os.environ.get("VIBE_TRADING_SSE_TIMEOUT", "90"))
+    event_bus = EventBus(timeout_seconds=sse_timeout)
 
     try:
         loop = asyncio.get_event_loop()
@@ -2724,6 +2842,121 @@ def _runner_liveness_state(broker: str) -> RunnerLivenessState:
     return RunnerLivenessState(broker=broker, alive=alive, last_tick=tick, last_tick_age_seconds=age)
 
 
+@app.get("/config/debug")
+async def config_debug_endpoint():
+    """Return current configuration values for debugging.
+    
+    This endpoint helps verify that timeout and retry configurations
+    are correctly loaded from environment variables.
+    """
+    timeout_seconds = int(os.environ.get("TIMEOUT_SECONDS", "120"))
+    max_retries = int(os.environ.get("MAX_RETRIES", "2"))
+    sse_timeout = int(os.environ.get("VIBE_TRADING_SSE_TIMEOUT", "90"))
+    socks5_proxy = os.environ.get("SOCKS5_PROXY", "socks5h://127.0.0.1:1080")
+    proxy_timeout = int(os.environ.get("PROXY_TIMEOUT", "10"))
+    
+    return {
+        "TIMEOUT_SECONDS": timeout_seconds,
+        "MAX_RETRIES": max_retries,
+        "VIBE_TRADING_SSE_TIMEOUT": sse_timeout,
+        "SOCKS5_PROXY": socks5_proxy,
+        "PROXY_TIMEOUT": proxy_timeout,
+        "LANGCHAIN_PROVIDER": os.environ.get("LANGCHAIN_PROVIDER"),
+        "LANGCHAIN_MODEL_NAME": os.environ.get("LANGCHAIN_MODEL_NAME"),
+        "timestamp": datetime.now().isoformat(),
+    }
+
+
+@app.get("/proxy/test")
+async def proxy_test_endpoint(target: str = Query("china", enum=["china", "foreign", "custom"]), 
+                              url: str = Query(None)):
+    """Test proxy routing logic for different domain types.
+    
+    Args:
+        target: Type of domain to test - 'china' for domestic, 'foreign' for overseas
+        url: Custom URL to test (when target='custom')
+    
+    Returns:
+        Test results with proxy decision and connection status
+    """
+    import requests
+    import time
+    
+    test_cases = {
+        "china": [
+            {"name": "百度", "url": "https://www.baidu.com"},
+            {"name": "东方财富", "url": "https://www.eastmoney.com"},
+            {"name": "新浪财经", "url": "https://finance.sina.com.cn"},
+        ],
+        "foreign": [
+            {"name": "Binance", "url": "https://api.binance.com/api/v3/ping"},
+            {"name": "CoinGecko", "url": "https://api.coingecko.com/api/v3/ping"},
+            {"name": "Jina AI", "url": "https://r.jina.ai/"},
+            {"name": "DuckDuckGo", "url": "https://api.duckduckgo.com/"},
+        ]
+    }
+    
+    if target == "custom" and url:
+        test_urls = [{"name": "Custom", "url": url}]
+    elif target in test_cases:
+        test_urls = test_cases[target]
+    else:
+        return {"error": "Invalid target type"}
+    
+    results = []
+    for case in test_urls:
+        start_time = time.time()
+        try:
+            # 获取代理配置
+            proxy = get_proxy_for_url(case["url"])
+            
+            # 创建会话并配置代理
+            session = requests.Session()
+            if proxy:
+                session.proxies = {"http": proxy, "https": proxy}
+            
+            logger.info(f"[PROXY-TEST] Testing {case['name']}: {case['url']}")
+            logger.info(f"[PROXY-TEST] Proxy decision: {'使用代理 ' + proxy if proxy else '直接连接'}")
+            
+            # 发送请求
+            response = session.get(case["url"], timeout=15)
+            response.raise_for_status()
+            
+            elapsed = time.time() - start_time
+            logger.info(f"[PROXY-TEST] {case['name']} 请求成功，耗时: {elapsed:.2f}s")
+            
+            results.append({
+                "name": case["name"],
+                "url": case["url"],
+                "proxy_used": proxy if proxy else "直接连接",
+                "status": "success",
+                "status_code": response.status_code,
+                "latency_ms": int(elapsed * 1000),
+            })
+        except Exception as e:
+            elapsed = time.time() - start_time
+            logger.error(f"[PROXY-TEST] {case['name']} 请求失败: {str(e)}")
+            results.append({
+                "name": case["name"],
+                "url": case["url"],
+                "proxy_used": proxy if proxy else "直接连接",
+                "status": "failed",
+                "error": str(e),
+                "latency_ms": int(elapsed * 1000),
+            })
+    
+    return {
+        "test_type": target,
+        "proxy_config": {
+            "SOCKS5_PROXY": os.environ.get("SOCKS5_PROXY", "socks5h://127.0.0.1:1080"),
+            "PROXY_TIMEOUT": os.environ.get("PROXY_TIMEOUT", "10"),
+            "MAX_RETRIES": os.environ.get("MAX_RETRIES", "2"),
+        },
+        "results": results,
+        "timestamp": datetime.now().isoformat(),
+    }
+
+
 @app.get("/live/status", response_model=LiveStatusResponse, dependencies=[Depends(require_auth)])
 async def live_status_endpoint(broker: Optional[str] = Query(None, max_length=64)):
     """Return live-channel status: auth, active mandate, runner liveness, halt (C2).
@@ -3062,18 +3295,25 @@ async def stop_runner_endpoint(payload: LiveRunnerControlRequest):
 # ============================================================================
 
 from src.api.alpha_routes import register_alpha_routes  # noqa: E402
-register_alpha_routes(app)
+register_alpha_routes(app, require_auth=require_auth, require_event_stream_auth=require_event_stream_auth)
 
 
 # ============================================================================
-# Main Entry Point
+# Static frontend hosting (must come AFTER all API routes are registered)
 # ============================================================================
 
-def serve_main(argv: list[str] | None = None) -> int:
-    """Start the API server from CLI-style arguments."""
-    import argparse
-    import subprocess
-    import uvicorn
+logger.info("[static-mount] ================================================")
+logger.info("[static-mount] Phase: Static frontend hosting (all API routes registered)")
+
+# Print route registration summary BEFORE mounting static files
+_api_routes = [r for r in app.routes if hasattr(r, "methods") and r.methods]
+_mount_routes = [r for r in app.routes if hasattr(r, "path") and not hasattr(r, "methods")]
+logger.info(f"[static-mount] Current routes: {len(_api_routes)} API endpoints, {len(_mount_routes)} mount points")
+for _r in app.routes:
+    _methods = getattr(_r, "methods", "—")
+    logger.info(f"[static-mount]   route: {getattr(_r, 'path', '?'):40s} methods={_methods}")
+
+try:
     from fastapi.staticfiles import StaticFiles
     from starlette.exceptions import HTTPException as StarletteHTTPException
 
@@ -3088,6 +3328,48 @@ def serve_main(argv: list[str] | None = None) -> int:
                     raise
                 return await super().get_response("index.html", scope)
 
+    frontend_dist = Path(__file__).resolve().parent.parent / "frontend" / "dist"
+    logger.info(f"[static-mount] Frontend dist path: {frontend_dist}")
+    logger.info(f"[static-mount] dist directory exists: {frontend_dist.exists()}")
+    if frontend_dist.exists():
+        _idx = frontend_dist / "index.html"
+        logger.info(f"[static-mount] index.html exists: {_idx.exists()}, size={_idx.stat().st_size if _idx.exists() else 0} bytes")
+        # list assets directory for verification
+        _assets = frontend_dist / "assets"
+        if _assets.exists():
+            _asset_files = [p.name for p in _assets.iterdir()]
+            logger.info(f"[static-mount] {len(_asset_files)} files in /assets/")
+            for _f in _asset_files:
+                logger.info(f"[static-mount]   asset: {_f}")
+    if frontend_dist.exists() and (frontend_dist / "index.html").exists():
+        # Always mount static files at root (FastAPI routes match in registration order)
+        # Static mount at the end will serve as fallback for unmatched routes
+        logger.info("[static-mount] Mounting SPAStaticFiles at path '/' (root)")
+        app.mount("/", SPAStaticFiles(directory=str(frontend_dist), html=True), name="frontend")
+        logger.info(f"[static-mount] ✅ Frontend static files MOUNTED from {frontend_dist}")
+        logger.info(f"[static-mount] Final route count: {len(app.routes)}")
+        # Print last 5 routes to show static mount is at end
+        for _r in app.routes[-5:]:
+            _methods = getattr(_r, "methods", "mount")
+            logger.info(f"[static-mount]   final route: {getattr(_r, 'path', '?'):40s} type={_methods}")
+    else:
+        logger.warning(f"[static-mount] ❌ No frontend build found at {frontend_dist}")
+        logger.warning("[static-mount] Hint: Run 'cd frontend && npm install && npm run build'")
+except Exception as _e:
+    logger.warning(f"[static-mount] ❌ Failed to mount frontend static files: {_e}")
+logger.info("[static-mount] ================================================")
+
+
+# ============================================================================
+# Main Entry Point
+# ============================================================================
+
+def serve_main(argv: list[str] | None = None) -> int:
+    """Start the API server from CLI-style arguments."""
+    import argparse
+    import subprocess
+    import uvicorn
+
     parser = argparse.ArgumentParser(description="Vibe-Trading Server")
     parser.add_argument("--port", type=int, default=8000, help="Listen port (default 8000)")
     parser.add_argument("--host", default="0.0.0.0", help="Bind address")
@@ -3100,25 +3382,58 @@ def serve_main(argv: list[str] | None = None) -> int:
     frontend_dist = Path(__file__).resolve().parent.parent / "frontend" / "dist"
     frontend_root = Path(__file__).resolve().parent.parent / "frontend"
 
+    # === Startup banner with detailed diagnostics ===
+    logger.info("=" * 60)
+    logger.info("  Vibe-Trading API Server — Startup")
+    logger.info(f"  Bind: http://{args.host}:{args.port}")
+    logger.info(f"  Mode: {'DEV (Vite on :5173)' if args.dev else 'PROD (static dist)'}")
+    logger.info(f"  Frontend dist: {frontend_dist}")
+    logger.info(f"  Frontend dist exists: {frontend_dist.exists()}")
+
+    # Verify static mount status (the module-level block already mounted)
+    _root_mounted = any(route.path == "/" for route in app.routes)
+    _total_routes = len(app.routes)
+    _api_count = sum(1 for r in app.routes if hasattr(r, "methods") and r.methods)
+    logger.info(f"  Total routes registered: {_total_routes}")
+    logger.info(f"  API endpoints: {_api_count}")
+    logger.info(f"  Static files mounted at '/': {_root_mounted}")
+    if _root_mounted and frontend_dist.exists():
+        logger.info(f"  ✅ Static frontend: READY ({frontend_dist})")
+    elif frontend_dist.exists():
+        logger.warning(f"  ⚠️  Frontend dist exists but NOT mounted — check [static-mount] phase above")
+    else:
+        logger.warning(f"  ⚠️  Frontend NOT built — run: cd frontend && npm install && npm run build")
+    logger.info("=" * 60)
+
     vite_proc = None
     if args.dev and frontend_root.exists():
-        print("[dev] Starting Vite dev server on :5173 ...")
+        logger.info("[dev] Starting Vite dev server on :5173 ...")
         vite_proc = subprocess.Popen(
             ["npx", "vite", "--host", "0.0.0.0"],
             cwd=str(frontend_root),
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
-        print(f"[dev] Vite PID={vite_proc.pid}")
-        print("[dev] Frontend: http://localhost:5173")
-        print(f"[dev] API: http://localhost:{args.port}")
-    elif frontend_dist.exists():
-        if not any(route.path == "/" for route in app.routes):
-            app.mount("/", SPAStaticFiles(directory=str(frontend_dist), html=True), name="frontend")
-        print(f"[prod] Frontend served from {frontend_dist}")
-    else:
-        print(f"[warn] No frontend build found at {frontend_dist}")
-        print("[warn] Run: cd frontend && npm run build")
+        logger.info(f"[dev] Vite PID={vite_proc.pid}")
+    elif frontend_dist.exists() and not _root_mounted:
+        # fallback mount if module-level didn't succeed (should not normally happen)
+        try:
+            from fastapi.staticfiles import StaticFiles
+            from starlette.exceptions import HTTPException as StarletteHTTPException
+
+            class _FallbackSPAStaticFiles(StaticFiles):
+                async def get_response(self, path: str, scope: Dict[str, Any]):
+                    try:
+                        return await super().get_response(path, scope)
+                    except StarletteHTTPException as exc:
+                        if exc.status_code != status.HTTP_404_NOT_FOUND:
+                            raise
+                        return await super().get_response("index.html", scope)
+
+            app.mount("/", _FallbackSPAStaticFiles(directory=str(frontend_dist), html=True), name="frontend")
+            logger.warning("[serve_main] Fallback: mounted static files in serve_main (should have been module-level)")
+        except Exception as _e:
+            logger.warning(f"[serve_main] Fallback mount failed: {_e}")
 
     print("=" * 50)
     print("  Vibe-Trading Server")
@@ -3130,7 +3445,7 @@ def serve_main(argv: list[str] | None = None) -> int:
     finally:
         if vite_proc:
             vite_proc.terminate()
-            print("[dev] Vite stopped")
+            logger.info("[dev] Vite stopped")
     return 0
 
 

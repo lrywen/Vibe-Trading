@@ -25,6 +25,7 @@ import { MetricsCard } from "@/components/chat/MetricsCard";
 import { ValidationPanel } from "@/components/charts/ValidationPanel";
 import { Skeleton, SkeletonMetrics, SkeletonChart } from "@/components/common/Skeleton";
 import { ErrorBoundary } from "@/components/common/ErrorBoundary";
+import { useTranslation } from "@/lib/i18n";
 
 const rehypePlugins = [rehypeHighlight];
 
@@ -63,6 +64,7 @@ function buildMetricsCsv(metrics: BacktestMetrics): string {
 }
 
 export function RunDetail() {
+  const { t } = useTranslation();
   const { runId } = useParams<{ runId: string }>();
   const navigate = useNavigate();
   const [run, setRun] = useState<RunData | null>(null);
@@ -73,11 +75,11 @@ export function RunDetail() {
   const hasValidation = !!run?.validation;
   const hasRunCard = !!run?.run_card;
   const TABS: { id: Tab; label: string; icon: typeof BarChart3; hidden?: boolean }[] = [
-    { id: "chart", label: "Chart", icon: BarChart3 },
-    { id: "trades", label: "Trades", icon: List },
-    { id: "validation", label: "Validation", icon: ShieldCheck, hidden: !hasValidation },
-    { id: "runCard", label: "Run Card", icon: FileCheck2, hidden: !hasRunCard },
-    { id: "code", label: "Code", icon: Code2 },
+    { id: "chart", label: t("runDetail.chart"), icon: BarChart3 },
+    { id: "trades", label: t("runDetail.trades"), icon: List },
+    { id: "validation", label: t("runDetail.validation"), icon: ShieldCheck, hidden: !hasValidation },
+    { id: "runCard", label: t("runDetail.runCard"), icon: FileCheck2, hidden: !hasRunCard },
+    { id: "code", label: t("runDetail.code"), icon: Code2 },
   ];
 
   useEffect(() => {
@@ -101,8 +103,7 @@ export function RunDetail() {
     <div className="p-8 space-y-2">
       <p className="text-red-500 font-medium">Run not found</p>
       <p className="text-sm text-muted-foreground">
-        The run directory may have been removed, or your browser may not have API access configured.
-        Check that the API authentication key is set in Settings if accessing remotely.
+        {t("runDetail.runMissingDesc")}
       </p>
       <button
         onClick={() => navigate(-1)}
@@ -117,7 +118,6 @@ export function RunDetail() {
 
   return (
     <div className="flex flex-col h-full">
-      {/* Header */}
       <div className="border-b p-4 space-y-3">
         <div className="flex items-center gap-3">
           <button
@@ -162,9 +162,9 @@ export function RunDetail() {
               <button
                 onClick={() => downloadCsv(`metrics_${runId}.csv`, buildMetricsCsv(run.metrics!))}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs text-muted-foreground hover:bg-muted transition-colors"
-                title="Download Metrics CSV"
+                title={t("runDetail.downloadMetrics")}
               >
-                <Download className="h-3.5 w-3.5" /> Download Metrics CSV
+                <Download className="h-3.5 w-3.5" /> {t("runDetail.downloadMetrics")}
               </button>
             )}
           </div>

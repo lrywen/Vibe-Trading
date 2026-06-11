@@ -60,15 +60,18 @@ class EventBus:
 
     Attributes:
         max_buffer_size: Maximum number of buffered events per session.
+        timeout_seconds: Timeout for queue.get() in subscribe().
     """
 
-    def __init__(self, max_buffer_size: int = 500) -> None:
+    def __init__(self, max_buffer_size: int = 500, timeout_seconds: float = 30.0) -> None:
         """Initialize the event bus.
 
         Args:
             max_buffer_size: Maximum number of buffered events per session.
+            timeout_seconds: Timeout for queue.get() in subscribe().
         """
         self.max_buffer_size = max_buffer_size
+        self.timeout_seconds = timeout_seconds
         self._buffers: Dict[str, List[SSEEvent]] = {}
         self._subscribers: Dict[str, List[asyncio.Queue]] = {}
         self._lock = threading.Lock()
@@ -210,7 +213,7 @@ class EventBus:
 
             while True:
                 try:
-                    event = await asyncio.wait_for(queue.get(), timeout=30.0)
+                    event = await asyncio.wait_for(queue.get(), timeout=self.timeout_seconds)
                     yield event
                 except asyncio.TimeoutError:
                     yield SSEEvent(

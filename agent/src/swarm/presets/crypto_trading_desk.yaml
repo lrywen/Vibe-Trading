@@ -37,9 +37,9 @@ agents:
       - OI × Funding rate matrix signal (leveraged build-up / liquidation / quiet)
       - Long/short ratio (retail contrarian indicator)
 
-      Use load_skill for funding rate analysis patterns and OKX data interfaces.
+      Use load_skill for funding rate analysis patterns and Gate.io/CCXT data interfaces.
     tools: [bash, read_file, write_file, load_skill]
-    skills: [perp-funding-basis, okx-market, crypto-derivatives]
+    skills: [perp-funding-basis, ccxt, crypto-derivatives]
     max_iterations: 50
     timeout_seconds: 1800
     max_retries: 1

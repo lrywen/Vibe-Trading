@@ -3,13 +3,18 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
+from pathlib import Path
 from typing import Any
 
 from src.agent.tools import BaseTool
 
 _OUTPUT_LIMIT = 50_000
 _DEFAULT_TIMEOUT = 120
+
+# Get the agent source root directory for PYTHONPATH
+_AGENT_SRC_ROOT = str(Path(__file__).resolve().parent.parent)
 
 
 class BashTool(BaseTool):
@@ -39,6 +44,15 @@ class BashTool(BaseTool):
         command = kwargs["command"]
         cwd = kwargs.get("run_dir")
 
+        # Build environment with proper PYTHONPATH for Python execution
+        env = os.environ.copy()
+        existing_pythonpath = env.get("PYTHONPATH", "")
+        # Prepend agent src root to PYTHONPATH so `from src.xxx import` works
+        if existing_pythonpath:
+            env["PYTHONPATH"] = f"{_AGENT_SRC_ROOT}:{existing_pythonpath}"
+        else:
+            env["PYTHONPATH"] = _AGENT_SRC_ROOT
+
         try:
             result = subprocess.run(
                 command,
@@ -50,6 +64,7 @@ class BashTool(BaseTool):
                 timeout=_DEFAULT_TIMEOUT,
                 encoding="utf-8",
                 errors="replace",
+                env=env,
             )
             stdout = result.stdout[:_OUTPUT_LIMIT] if len(result.stdout) > _OUTPUT_LIMIT else result.stdout
             stderr = result.stderr[:_OUTPUT_LIMIT] if len(result.stderr) > _OUTPUT_LIMIT else result.stderr

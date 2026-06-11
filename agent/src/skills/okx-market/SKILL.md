@@ -1,13 +1,19 @@
 ---
 name: okx-market
-description: OKX cryptocurrency market data interface. Uses the OKX V5 REST API to retrieve spot, derivatives, index, and other crypto market data, including real-time prices, candlesticks, funding rates, open interest, and more. No authentication required, free to use.
+description: OKX cryptocurrency market data interface (FALLBACK). Uses the OKX V5 REST API. Use this ONLY when Gate.io/CCXT is unavailable. No authentication required.
 category: data-source
 ---
-# OKX Market
+# OKX Market (Fallback Data Source)
 
 ## Overview
 
-The OKX V5 REST API provides comprehensive cryptocurrency market data covering spot, perpetual swaps, delivery futures, options, and more. All market-data endpoints are public and can be called directly without authentication. The data comes from OKX, the world's second-largest cryptocurrency exchange.
+**Note: This is a FALLBACK data source. The primary crypto data source is Gate.io via CCXT.**
+
+The OKX V5 REST API provides comprehensive cryptocurrency market data covering spot, perpetual swaps, delivery futures, options, and more. All market-data endpoints are public and can be called directly without authentication.
+
+**When to use:**
+- Primary: Use `ccxt` skill with Gate.io (default)
+- Fallback: Use this OKX skill only when Gate.io is unavailable or for OKX-specific data
 
 ## Quick Start
 

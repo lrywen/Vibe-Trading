@@ -16,6 +16,7 @@ import { ToolProgressIndicator } from "@/components/chat/ToolProgressIndicator";
 import { MandateProposalCard } from "@/components/chat/MandateProposalCard";
 import { RunnerStatus } from "@/components/chat/RunnerStatus";
 import { SwarmStatusCard } from "@/components/chat/SwarmStatusCard";
+import { useTranslation } from "@/lib/i18n";
 import {
   applySwarmEvent,
   buildSwarmStatusFromStarted,
@@ -206,6 +207,7 @@ function goalContinuePrompt(snapshot: GoalSnapshot): string {
 
 /* ---------- Component ---------- */
 export function Agent() {
+  const { t } = useTranslation();
   const [input, setInput] = useState("");
   const [searchParams, setSearchParams] = useSearchParams();
   const listRef = useRef<HTMLDivElement>(null);
@@ -795,7 +797,7 @@ export function Agent() {
         await api.sendMessage(sid, kickoff);
       } catch (error) {
         act().setStatus("idle");
-        toast.error(error instanceof Error ? error.message : "Failed to start goal.");
+        toast.error(error instanceof Error ? error.message : t("agent.failedToStartGoal"));
       }
       return;
     }
@@ -830,8 +832,8 @@ export function Agent() {
       await api.sendMessage(sid, finalPrompt);
     } catch {
       act().setStatus("error");
-      toast.error("Failed to send message, please retry.");
-      act().addMessage({ id: "", type: "error", content: "Failed to send message, please retry.", timestamp: Date.now() });
+      toast.error(t("agent.failedToSend"));
+      act().addMessage({ id: "", type: "error", content: t("agent.failedToSend"), timestamp: Date.now() });
     }
   };
 
@@ -1072,9 +1074,9 @@ export function Agent() {
   const liveIsHalted = isGlobalLiveHalt(liveHalted) || (liveStatus?.global_halted ?? false);
 
   return (
-    <div className="flex flex-col flex-1 min-w-0 overflow-hidden h-full">
-      <div ref={listRef} className="flex-1 overflow-auto p-6 scroll-smooth relative">
-        <div className="max-w-3xl mx-auto space-y-4">
+    <div className="flex h-full min-w-0 flex-1 flex-col overflow-hidden">
+      <div ref={listRef} className="relative flex-1 overflow-auto p-3 scroll-smooth sm:p-6">
+        <div className="mx-auto max-w-3xl space-y-4">
           {sessionLoading && (
             <div className="space-y-4 py-4">
               {[1, 2, 3].map(i => (
@@ -1165,7 +1167,7 @@ export function Agent() {
               <div className="h-0.5 flex-1 rounded-full bg-primary/20 overflow-hidden">
                 <div className="h-full w-1/3 bg-primary rounded-full animate-[pulse-slide_2s_ease-in-out_infinite]" />
               </div>
-              <span className="text-[10px] text-muted-foreground shrink-0 tabular-nums">running</span>
+              <span className="text-[10px] text-muted-foreground shrink-0 tabular-nums">{t("agent.running")}</span>
             </div>
           )}
 
@@ -1177,14 +1179,14 @@ export function Agent() {
             onClick={forceScrollToBottom}
             className="sticky bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-1 px-3 py-1.5 rounded-full bg-primary text-primary-foreground text-xs font-medium shadow-lg hover:opacity-90 transition-opacity z-10"
           >
-            <ArrowDown className="h-3 w-3" /> New messages
+            <ArrowDown className="h-3 w-3" /> {t("agent.newMessages")}
           </button>
         )}
         <ConversationTimeline messages={messages} containerRef={listRef} />
       </div>
 
-      <form onSubmit={handleSubmit} className="border-t p-4 bg-background/80 backdrop-blur-sm">
-        <div className="max-w-3xl mx-auto space-y-2">
+      <form onSubmit={handleSubmit} className="border-t bg-background/80 p-3 backdrop-blur-sm sm:p-4">
+        <div className="mx-auto max-w-3xl space-y-2">
           {/* Swarm preset badge */}
           {swarmPreset && (
             <div className="flex items-center gap-1">
@@ -1201,7 +1203,7 @@ export function Agent() {
             <div className="flex items-center gap-1">
               <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-primary/10 text-primary text-xs font-medium">
                 <Target className="h-3 w-3" />
-                New Research Goal
+                {t("agent.newResearchGoalBadge")}
                 <button type="button" onClick={() => setGoalComposerActive(false)} className="hover:text-destructive transition-colors">
                   <X className="h-3 w-3" />
                 </button>
@@ -1230,7 +1232,7 @@ export function Agent() {
                 )}
                 {goalProgress.evidenceTotal > 0 && (
                   <span className="shrink-0 rounded bg-background px-1 font-mono text-[10px] text-primary" title="Evidence collected toward this research goal">
-                    {goalProgress.evidenceTotal} evidence
+                    {goalProgress.evidenceTotal} {t("agent.evidence")}
                   </span>
                 )}
                 <ChevronDown
@@ -1287,7 +1289,7 @@ export function Agent() {
                     </div>
                     <div className="rounded-lg border bg-muted/20 p-2.5">
                       <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                        Evidence
+                        {t("agent.evidence")}
                       </div>
                       <div className="mt-1 font-mono text-base font-semibold text-foreground">
                         {goalProgress.evidenceTotal}
@@ -1324,7 +1326,7 @@ export function Agent() {
                   {goalSnapshot.evidence.length > 0 && (
                     <div className="grid gap-1.5 border-t pt-2">
                       <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                        Recent Evidence
+                        {t("agent.recentEvidence")}
                       </div>
                       {latestGoalEvidence(goalSnapshot).map((item) => (
                         <div key={item.evidence_id} className="rounded-lg bg-muted/20 px-2 py-1.5">
@@ -1395,7 +1397,7 @@ export function Agent() {
           {uploading && (
             <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <Loader2 className="h-3 w-3 animate-spin" />
-              Uploading...
+              {t("agent.uploading")}
             </div>
           )}
           {/* Persistent kill switch — distinct from the per-turn Stop button
@@ -1421,7 +1423,7 @@ export function Agent() {
               )}
             </div>
           )}
-          <div className="flex gap-2 items-end">
+          <div className="flex min-w-0 items-end gap-2">
             {/* "+" menu: PDF upload + Swarm presets */}
             <div className="relative" ref={uploadMenuRef}>
               <button
@@ -1429,12 +1431,12 @@ export function Agent() {
                 onClick={() => setShowUploadMenu(prev => !prev)}
                 disabled={status === "streaming" || uploading}
                 className="w-9 h-9 rounded-full border flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40 shrink-0"
-                title="More options"
+                title={t("agent.moreOptions")}
               >
                 <Plus className="h-4 w-4" />
               </button>
               {showUploadMenu && (
-                <div className="absolute bottom-full left-0 mb-2 w-52 rounded-xl border bg-background/95 backdrop-blur-sm shadow-lg py-1 z-50">
+                <div className="absolute bottom-full left-0 z-50 mb-2 w-52 max-w-[calc(100vw-2rem)] rounded-xl border bg-background/95 py-1 shadow-lg backdrop-blur-sm">
                   <button
                     type="button"
                     onClick={() => { fileInputRef.current?.click(); setShowUploadMenu(false); }}
@@ -1480,7 +1482,7 @@ export function Agent() {
                     className="w-full px-3 py-2 text-left text-sm hover:bg-muted transition-colors flex items-center gap-2"
                   >
                     <Landmark className="h-4 w-4" />
-                    Check Trading Connector
+                    {t("agent.checkConnector")}
                   </button>
                   <button
                     type="button"
@@ -1491,7 +1493,7 @@ export function Agent() {
                     className="w-full px-3 py-2 text-left text-sm hover:bg-muted transition-colors flex items-center gap-2"
                   >
                     <Landmark className="h-4 w-4" />
-                    Analyze Connector Portfolio
+                    {t("agent.analyzePortfolio")}
                   </button>
                 </div>
               )}
@@ -1540,15 +1542,15 @@ export function Agent() {
                   ? "Describe the research goal to attach to this session"
                   : "e.g. Create a dual MA crossover strategy for 000001.SZ, backtest 2024"
               }
-              className="flex-1 px-4 py-2.5 rounded-xl border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/40 transition-shadow resize-none max-h-32 overflow-y-auto"
+              className="min-w-0 flex-1 resize-none overflow-y-auto rounded-xl border bg-background px-3 py-2.5 text-base transition-shadow max-h-32 focus:outline-none focus:ring-2 focus:ring-primary/40 sm:px-4 sm:text-sm"
               disabled={status === "streaming"}
             />
             {messages.length > 0 && (
               <button
                 type="button"
                 onClick={handleExport}
-                className="px-3 py-2.5 rounded-xl border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-                title="Export chat"
+                className="shrink-0 rounded-xl border px-3 py-2.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                title={t("agent.exportChat")}
               >
                 <Download className="h-4 w-4" />
               </button>
@@ -1557,8 +1559,8 @@ export function Agent() {
               <button
                 type="button"
                 onClick={handleCancel}
-                className="px-4 py-2.5 rounded-xl bg-destructive text-destructive-foreground text-sm font-medium hover:opacity-90 transition-opacity"
-                title="Stop generation"
+                className="shrink-0 rounded-xl bg-destructive px-3 py-2.5 text-sm font-medium text-destructive-foreground transition-opacity hover:opacity-90 sm:px-4"
+                title={t("agent.stopGeneration")}
               >
                 <Square className="h-4 w-4" />
               </button>
@@ -1566,7 +1568,7 @@ export function Agent() {
               <button
                 type="submit"
                 disabled={goalComposerActive ? !input.trim() : (!input.trim() && !attachment)}
-                className="px-4 py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-medium disabled:opacity-40 hover:opacity-90 transition-opacity"
+                className="shrink-0 rounded-xl bg-primary px-3 py-2.5 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-40 sm:px-4"
               >
                 <Send className="h-4 w-4" />
               </button>

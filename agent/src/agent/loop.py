@@ -359,6 +359,14 @@ class AgentLoop:
         Returns:
             Execution result dict.
         """
+        logger.info("=" * 60)
+        logger.info("▶ AgentLoop.run() started")
+        logger.info("  user_message_len=%d, history=%d, session_id=%r",
+                    len(user_message) if user_message else 0,
+                    len(history) if history else 0,
+                    session_id)
+        overall_start = _time.time()
+
         # Reset per-run state (safe for reuse across multiple run() calls)
         self._cancelled = False
         self._called_ok = set()
@@ -373,6 +381,7 @@ class AgentLoop:
             run_dir = state_store.create_run_dir(RUNS_DIR)
             self.memory.run_dir = str(run_dir)
 
+        logger.info("  run_dir=%s", run_dir)
         state_store.save_request(run_dir, user_message, {"session_id": session_id})
 
         context = ContextBuilder(self.registry, self.memory,
@@ -380,6 +389,7 @@ class AgentLoop:
         goal_context, active_goal_id = get_current_goal_context(session_id) if session_id else ("", None)
         llm_user_message = user_message
         if goal_context:
+            logger.info("  Active goal detected: goal_id=%s", active_goal_id)
             llm_user_message = (
                 f"{goal_context}\n\n"
                 f"<user-message>\n{user_message}\n</user-message>"
@@ -388,6 +398,9 @@ class AgentLoop:
         goal_turn_accounted = False
         messages = context.build_messages(llm_user_message, history)
         react_trace: List[Dict[str, Any]] = []
+        logger.info("  Initial messages=%d, registry_tools=%d, max_iterations=%d",
+                    len(messages), len(self.registry._tools) if hasattr(self.registry, "_tools") else "?",
+                    self.max_iterations)
 
         trace = TraceWriter(run_dir)
         trace.write({"type": "start", "prompt": user_message[:500]})
@@ -429,7 +442,9 @@ class AgentLoop:
                     logger.info(f"Auto compact triggered: {tokens} tokens > {TOKEN_THRESHOLD}")
                     self._auto_compact(messages, run_dir, trace)
 
-                logger.info(f"ReAct iteration {iteration}/{self.max_iterations}")
+                logger.info("▶ ReAct iter %d/%d — tokens=%d, msgs=%d",
+                            iteration, self.max_iterations,
+                            estimate_tokens(messages), len(messages))
 
                 # Inject wrap-up nudge when approaching iteration limit.
                 # Skip on the first iteration (tiny budgets) and on the last
@@ -438,6 +453,7 @@ class AgentLoop:
                 # context as the most recent user message.
                 if iteration == wrap_up_at and 1 < iteration < self.max_iterations:
                     remaining = self.max_iterations - iteration
+                    logger.info("  Injecting wrap-up nudge (%d iterations left)", remaining)
                     messages.append({
                         "role": "user",
                         "content": (
@@ -459,13 +475,29 @@ class AgentLoop:
                 is_last_iteration = (iteration == self.max_iterations)
                 tool_defs = None if is_last_iteration else self.registry.get_definitions()
                 if is_last_iteration:
+                    logger.info("  [iter %d] Last iteration — forcing text-only (no tools)", iteration)
                     trace.write({"type": "forced_text_only", "iter": iteration})
 
+                import os
+                timeout_config = int(os.environ.get("TIMEOUT_SECONDS", "120"))
+                retries_config = int(os.environ.get("MAX_RETRIES", "2"))
+                
+                logger.info("  [iter %d] ⚙️  Config: TIMEOUT_SECONDS=%d, MAX_RETRIES=%d",
+                            iteration, timeout_config, retries_config)
+                logger.info("  [iter %d] Calling LLM stream_chat — tool_defs=%d, messages=%d, tokens=%d",
+                            iteration, len(tool_defs) if tool_defs else 0, 
+                            len(messages), estimate_tokens(messages))
+                llm_start = _time.time()
                 response = self.llm.stream_chat(
                     messages,
                     tools=tool_defs,
                     on_text_chunk=_on_text_chunk,
                 )
+                llm_elapsed = _time.time() - llm_start
+                logger.info("  [iter %d] LLM returned in %.2fs — has_tool_calls=%s, finish=%s, thinking_len=%d",
+                            iteration, llm_elapsed,
+                            response.has_tool_calls, response.finish_reason,
+                            len("".join(thinking_chunks)))
                 usage = getattr(response, "usage_metadata", None) or {}
                 if usage:
                     self._emit(
@@ -510,6 +542,8 @@ class AgentLoop:
 
                 if not response.has_tool_calls:
                     final_content = response.content or ""
+                    logger.info("  [iter %d] ✔ No tool calls — LLM produced final answer (content_len=%d)",
+                                iteration, len(final_content))
                     should_continue_goal = False
                     continuation_snapshot = None
                     if active_goal_id and session_id and GOAL_MAX_CONTINUATIONS > 0:
@@ -625,6 +659,16 @@ class AgentLoop:
             state_store.mark_failure(run_dir, final_reason)
             final_status = "failed"
 
+        total_elapsed = _time.time() - overall_start
+        logger.info("▶ AgentLoop.run() finished")
+        logger.info("  status=%s, iterations=%d/%d, total_time=%.2fs",
+                    final_status, iteration, self.max_iterations, total_elapsed)
+        if final_reason:
+            logger.info("  reason=%s", final_reason)
+        if final_content:
+            logger.info("  final_content_len=%d", len(final_content))
+        logger.info("=" * 60)
+
         end_event: dict[str, Any] = {
             "type": "end",
             "status": final_status,
@@ -676,19 +720,26 @@ class AgentLoop:
         focus_topic = ""
         to_execute = []
 
-        for tc in tool_calls:
+        logger.info("  [iter %d] Processing %d tool calls from LLM", iteration, len(tool_calls))
+        for i, tc in enumerate(tool_calls):
+            logger.info("    tool_call[%d] name=%s, args_keys=%s",
+                        i, tc.name, list(tc.arguments.keys()) if tc.arguments else [])
+
             # Layer 4: compact tool — mark then defer execution
             if tc.name == "compact":
                 compact_requested = True
                 focus_topic = tc.arguments.get("focus_topic", "")
+                logger.info("    [compact] requested, focus_topic=%r", focus_topic)
                 messages.append(context.format_tool_result(tc.id, "compact", '{"status":"ok","message":"Compressing..."}'))
                 trace.write({"type": "compact_requested", "iter": iteration})
                 continue
 
             tool_def = self.registry.get(tc.name)
+            if tool_def is None:
+                logger.warning("    [unknown] tool %s not found in registry!", tc.name)
             is_repeatable = tool_def.repeatable if tool_def else False
             if tc.name in self._called_ok and not is_repeatable:
-                logger.warning(f"Blocked duplicate call: {tc.name} (already succeeded)")
+                logger.warning("    [blocked] duplicate call: %s (already succeeded, not repeatable)", tc.name)
                 skip_msg = json.dumps({"skipped": True, "reason": f"{tc.name} already completed successfully. Use the previous result."})
                 messages.append(context.format_tool_result(tc.id, tc.name, skip_msg))
                 trace.write({"type": "tool_skipped", "iter": iteration, "tool": tc.name})
@@ -696,14 +747,20 @@ class AgentLoop:
                 continue
 
             to_execute.append(tc)
+            logger.info("    [queued] %s → will execute", tc.name)
 
         if not to_execute:
+            logger.info("  [iter %d] No tools to execute after filtering", iteration)
             return compact_requested, focus_topic
 
         # Batch execute: consecutive readonly → parallel, write → serial
         if len(to_execute) == 1:
+            logger.info("  [iter %d] Single tool execution: %s", iteration, to_execute[0].name)
             self._execute_single(to_execute[0], context, messages, trace, react_trace, iteration)
         else:
+            tool_names = [tc.name for tc in to_execute]
+            logger.info("  [iter %d] Batch execution: %d tools = %s",
+                        iteration, len(to_execute), tool_names)
             self._batch_execute(to_execute, context, messages, trace, react_trace, iteration)
 
         return compact_requested, focus_topic
@@ -780,12 +837,17 @@ class AgentLoop:
             trace.write({"type": "tool_call", "iter": iteration, "tool": tc.name, "call_id": tc.id, "args": {k: str(v)[:200] for k, v in args.items()}})
             runnable.append((tc, args))
 
+        tool_names = [tc.name for tc, _ in runnable]
+        logger.info("    [iter %d] Starting parallel execution of %d tools: %s",
+                    iteration, len(runnable), tool_names)
+
         # Execute in parallel — each worker gets its own heartbeat + progress emitter.
         def _run(tc_args: tuple) -> tuple:
             tc, args = tc_args
-            result, elapsed_ms = self._invoke_tool(tc.name, args)
+            result, elapsed_ms = self._invoke_tool(tc.name, args, iteration)
             return tc, result, elapsed_ms
 
+        batch_start = _time.time()
         with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(runnable), 8)) as pool:
             futures = [pool.submit(_run, item) for item in runnable]
             results = []
@@ -794,7 +856,13 @@ class AgentLoop:
                     results.append(f.result())
                 except Exception as exc:
                     tc = runnable[i][0]
+                    logger.exception("    [iter %d] Parallel worker error for %s: %s",
+                                     iteration, tc.name, exc)
                     results.append((tc, json.dumps({"status": "error", "error": str(exc)}), 0))
+
+        batch_elapsed = _time.time() - batch_start
+        logger.info("    [iter %d] Parallel batch completed in %.2fs",
+                    iteration, batch_elapsed)
 
         # Process results in order
         for tc, result, elapsed_ms in results:
@@ -823,13 +891,14 @@ class AgentLoop:
 
         self._emit("tool_call", {"tool": tc.name, "arguments": {k: str(v)[:200] for k, v in args.items()}, "iter": iteration})
         trace.write({"type": "tool_call", "iter": iteration, "tool": tc.name, "call_id": tc.id, "args": {k: str(v)[:200] for k, v in args.items()}})
-        logger.info(f"Tool call: {tc.name}({list(args.keys())})")
+        logger.info("  [iter %d] ▶ Tool call: %s(args_keys=%s)",
+                    iteration, tc.name, list(args.keys()))
 
-        result, elapsed_ms = self._invoke_tool(tc.name, args)
+        result, elapsed_ms = self._invoke_tool(tc.name, args, iteration)
 
         self._finalize_tool_result(tc, result, elapsed_ms, context, messages, trace, react_trace, iteration)
 
-    def _invoke_tool(self, tool_name: str, args: Dict[str, Any]) -> tuple[str, int]:
+    def _invoke_tool(self, tool_name: str, args: Dict[str, Any], iteration: int = 0) -> tuple[str, int]:
         """Execute a tool with heartbeat + structured progress emission.
 
         Installs a thread-local progress emitter so the tool may call
@@ -856,6 +925,8 @@ class AgentLoop:
 
         _set_emitter(_on_progress)
         t0 = _time.perf_counter()
+        logger.debug("    [iter %d] _invoke_tool: calling registry.execute(%s, args_keys=%s)",
+                     iteration, tool_name, list(args.keys()))
         try:
             with HeartbeatTimer(
                 tool_name=tool_name,
@@ -863,9 +934,18 @@ class AgentLoop:
                 emit=_on_heartbeat,
             ):
                 result = self.registry.execute(tool_name, args)
+            elapsed_ms = int((_time.perf_counter() - t0) * 1000)
+            result_preview = (str(result)[:200] + "...") if result and len(str(result)) > 200 else str(result) if result else ""
+            logger.info("    [iter %d] ✔ Tool %s completed in %dms — result_len=%d",
+                        iteration, tool_name, elapsed_ms,
+                        len(str(result)) if result else 0)
+        except Exception as exc:
+            elapsed_ms = int((_time.perf_counter() - t0) * 1000)
+            logger.exception("    [iter %d] ✘ Tool %s FAILED in %dms: %s",
+                             iteration, tool_name, elapsed_ms, exc)
+            result = json.dumps({"status": "error", "error": str(exc), "error_type": type(exc).__name__})
         finally:
             _set_emitter(None)
-        elapsed_ms = int((_time.perf_counter() - t0) * 1000)
         return result, elapsed_ms
 
     def _finalize_tool_result(
@@ -924,8 +1004,13 @@ class AgentLoop:
             trace: TraceWriter.
             focus_topic: Optional topic to prioritize in the summary.
         """
+        compact_start = _time.time()
+        logger.info("  ▶ Context compression triggered — input_messages=%d, focus_topic=%r",
+                    len(messages), focus_topic or "none")
+
         # Save full transcript before compressing
         transcript_path = run_dir / f"transcript_{int(_time.time())}.jsonl"
+        logger.debug("    Saving full transcript to %s", transcript_path)
         with open(transcript_path, "w", encoding="utf-8") as f:
             for msg in messages:
                 f.write(json.dumps(msg, default=str, ensure_ascii=False) + "\n")
@@ -945,12 +1030,18 @@ class AgentLoop:
             accumulated += msg_tokens
             cut_idx = i
 
+        logger.debug("    Token-budget tail: ~%d tokens preserved (TAIL_TOKEN_BUDGET=%d)",
+                     accumulated, TAIL_TOKEN_BUDGET)
+
         # Don't split in the middle of a tool_call/tool_result pair
         while 0 < cut_idx < len(body) and body[cut_idx].get("role") == "tool":
             cut_idx += 1
 
         head = body[:cut_idx]
         tail = body[cut_idx:]
+
+        logger.info("    Split: head=%d messages will be summarized, tail=%d messages preserved",
+                    len(head), len(tail))
 
         if not head:
             # All body fits in tail budget — force a split to avoid infinite loop
@@ -959,7 +1050,7 @@ class AgentLoop:
                 head = body[:cut_idx]
                 tail = body[cut_idx:]
             else:
-                logger.warning("Auto compact: nothing to compress (body too small)")
+                logger.warning("    Auto compact: nothing to compress (body too small)")
                 return
 
         # Build focus section
@@ -980,6 +1071,7 @@ class AgentLoop:
         summary_resp = self.llm.chat([{"role": "user", "content": prompt}])
         summary = summary_resp.content or ""
         self._previous_summary = summary
+        logger.debug("    LLM summary produced — len=%d", len(summary))
 
         tokens_before = estimate_tokens(messages)
         trace.write({"type": "compact", "tokens_before": tokens_before, "summary": summary[:500],
@@ -1000,6 +1092,12 @@ class AgentLoop:
 
         # Fix orphaned tool pairs in the reconstructed message list
         _fix_tool_pairs(messages)
+
+        tokens_after = estimate_tokens(messages)
+        compact_elapsed = _time.time() - compact_start
+        logger.info("  ✔ Compression done in %.2fs — before=%d tokens, after=%d tokens, reduced=%d%%",
+                    compact_elapsed, tokens_before, tokens_after,
+                    int((1 - tokens_after / tokens_before) * 100) if tokens_before else 0)
 
     def _emit(self, event_type: str, data: Dict[str, Any]) -> None:
         """Fire an event via the callback."""

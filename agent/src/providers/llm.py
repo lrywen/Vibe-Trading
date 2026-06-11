@@ -1,12 +1,14 @@
-"""LLM factory."""
+"""LLM factory with fallback support."""
 
 from __future__ import annotations
 
+import json
 import logging
 import os
+import time
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, List, Optional
 from urllib.parse import urlsplit
 
 try:
@@ -18,6 +20,40 @@ try:
     from langchain_openai import ChatOpenAI
 except ImportError:
     ChatOpenAI = None  # type: ignore
+
+
+def _parse_fallback_models() -> List[dict]:
+    """Parse fallback models configuration from environment variable."""
+    fallback_config = os.getenv("FALLBACK_MODELS", "[]")
+    try:
+        models = json.loads(fallback_config)
+        if isinstance(models, list):
+            return models
+        return []
+    except json.JSONDecodeError:
+        logger.error("Failed to parse FALLBACK_MODELS configuration")
+        return []
+
+
+def _is_retryable_error(e: Exception) -> bool:
+    """Check if the error is retryable (engine busy, timeout, etc.)."""
+    error_str = str(e).lower()
+    return any(keyword in error_str for keyword in [
+        "engine busy",
+        "recvfromengineerror",
+        "one_api_error",
+        "code: 10010",
+        "server overloaded",
+        "service unavailable",
+        "timeout",
+        "connection reset",
+        "connection refused",
+        "max retries exceeded",
+        "500",
+        "502",
+        "503",
+        "504",
+    ])
 
 
 if ChatOpenAI is not None:
@@ -306,9 +342,9 @@ def _redact_base_url_for_log(raw: str | None) -> str:
 
 
 def _load_env_file(path: Path) -> None:
-    """Load a single .env file into os.environ (setdefault, no override)."""
+    """Load a single .env file into os.environ."""
     if load_dotenv is not None:
-        load_dotenv(dotenv_path=path, override=False)
+        load_dotenv(dotenv_path=path, override=True)
     else:
         for raw in path.read_text(encoding="utf-8").splitlines():
             line = raw.strip()
@@ -448,6 +484,42 @@ def build_llm(*, model_name: Optional[str] = None, callbacks: Any = None) -> Any
     # Optional reasoning activation for relays requiring opt-in (e.g. OpenRouter).
     # Moonshot/DeepSeek official APIs emit reasoning by default and ignore this field.
     effort = os.getenv("LANGCHAIN_REASONING_EFFORT", "").strip().lower()
+    
+    # Get fallback models configuration
+    fallback_models = _parse_fallback_models()
+    
+    if fallback_models:
+        logger.info(f"Fallback models configured: {len(fallback_models)} models available")
+        # Create primary model
+        primary_model = ChatOpenAIWithReasoning(
+            model=name,
+            temperature=temperature,
+            timeout=int(os.getenv("TIMEOUT_SECONDS", "120")),
+            max_retries=int(os.getenv("MAX_RETRIES", "2")),
+            callbacks=callbacks,
+            extra_body={"reasoning": {"effort": effort}} if effort else None,
+        )
+        # Create fallback models
+        fallback_instances = []
+        for i, fallback_config in enumerate(fallback_models):
+            try:
+                fallback_model = ChatOpenAI(
+                    model=fallback_config["model"],
+                    temperature=temperature,
+                    timeout=int(os.getenv("TIMEOUT_SECONDS", "120")),
+                    max_retries=int(os.getenv("MAX_RETRIES", "2")),
+                    api_key=fallback_config["api_key"],
+                    base_url=fallback_config["base_url"],
+                    callbacks=callbacks,
+                )
+                fallback_instances.append((fallback_config["model"], fallback_model))
+                logger.info(f"  Fallback #{i+1}: {fallback_config['model']}")
+            except Exception as e:
+                logger.error(f"Failed to create fallback model #{i+1} {fallback_config.get('model')}: {e}")
+        
+        return FallbackLLM(primary_model, fallback_instances)
+    
+    # Return single model without fallback
     return ChatOpenAIWithReasoning(
         model=name,
         temperature=temperature,
@@ -456,3 +528,195 @@ def build_llm(*, model_name: Optional[str] = None, callbacks: Any = None) -> Any
         callbacks=callbacks,
         extra_body={"reasoning": {"effort": effort}} if effort else None,
     )
+
+
+class FallbackLLM:
+    """LLM wrapper with automatic fallback to secondary models.
+    
+    This class wraps a primary LLM and a list of fallback LLMs. When the primary
+    model fails due to retryable errors (engine busy, timeout, etc.), it automatically
+    tries the fallback models in order.
+    
+    Attributes:
+        primary: Primary LLM instance
+        fallbacks: List of (model_name, llm_instance) tuples
+        logger: Module logger
+    """
+    
+    def __init__(self, primary: Any, fallbacks: List[tuple[str, Any]]):
+        """Initialize FallbackLLM.
+        
+        Args:
+            primary: Primary LLM instance (ChatOpenAI or similar)
+            fallbacks: List of (model_name, llm_instance) tuples
+        """
+        self.primary = primary
+        self.fallbacks = fallbacks
+        self.logger = logging.getLogger(__name__)
+    
+    def _try_invoke(self, llm: Any, messages: Any, config: dict = None) -> Any:
+        """Try to invoke an LLM with the given messages."""
+        import time as _time
+        config = config or {}
+        model_name = getattr(llm, "model_name", "unknown")
+        self.logger.info("[LLM-INVOKE] Starting invoke for model=%s, msg_count=%d", 
+                         model_name, len(messages) if messages else 0)
+        start_time = _time.time()
+        try:
+            result = llm.invoke(messages, config=config)
+            elapsed = _time.time() - start_time
+            self.logger.info("[LLM-INVOKE] ✔ Model %s succeeded in %.2fs, response_len=%d",
+                             model_name, elapsed, len(result.content) if result and hasattr(result, 'content') else 0)
+            return result
+        except Exception as e:
+            elapsed = _time.time() - start_time
+            self.logger.warning("[LLM-INVOKE] ✘ Model %s FAILED in %.2fs: %s (type=%s)",
+                                model_name, elapsed, str(e)[:200], type(e).__name__)
+            raise
+    
+    def _try_stream(self, llm: Any, messages: Any, config: dict = None):
+        """Try to stream from an LLM with the given messages."""
+        import time as _time
+        config = config or {}
+        model_name = getattr(llm, "model_name", "unknown")
+        self.logger.info("[LLM-STREAM] Starting stream for model=%s, msg_count=%d",
+                         model_name, len(messages) if messages else 0)
+        start_time = _time.time()
+        chunk_count = 0
+        try:
+            for chunk in llm.stream(messages, config=config):
+                chunk_count += 1
+                yield chunk
+            elapsed = _time.time() - start_time
+            self.logger.info("[LLM-STREAM] ✔ Model %s stream completed in %.2fs, chunks=%d",
+                             model_name, elapsed, chunk_count)
+        except Exception as e:
+            elapsed = _time.time() - start_time
+            self.logger.warning("[LLM-STREAM] ✘ Model %s stream FAILED in %.2fs after %d chunks: %s (type=%s)",
+                                model_name, elapsed, chunk_count, str(e)[:200], type(e).__name__)
+            raise
+    
+    def invoke(self, messages: Any, config: dict = None) -> Any:
+        """Invoke the LLM with fallback support.
+        
+        Args:
+            messages: Messages to send to the LLM
+            config: Optional configuration dict
+        
+        Returns:
+            LLM response
+        
+        Raises:
+            Exception: If all models fail
+        """
+        import time as _time
+        config = config or {}
+        last_exception = None
+        
+        total_start = _time.time()
+        self.logger.info("[FALLBACK-INVOKE] Starting invoke chain, primary=%s, fallbacks=%d",
+                         self.model_name, len(self.fallbacks))
+        
+        # Try primary model first
+        try:
+            self.logger.info("[FALLBACK-INVOKE] Attempting primary model: %s", self.model_name)
+            result = self._try_invoke(self.primary, messages, config)
+            total_elapsed = _time.time() - total_start
+            self.logger.info("[FALLBACK-INVOKE] ✔ Primary model succeeded, total_time=%.2fs", total_elapsed)
+            return result
+        except Exception as e:
+            last_exception = e
+            if not _is_retryable_error(e):
+                self.logger.warning("[FALLBACK-INVOKE] ✘ Primary model failed with non-retryable error: %s", str(e)[:200])
+                raise
+            self.logger.warning("[FALLBACK-INVOKE] ✘ Primary model failed with retryable error: %s", str(e)[:200])
+        
+        # Try fallback models
+        for idx, (model_name, fallback_model) in enumerate(self.fallbacks):
+            try:
+                self.logger.info("[FALLBACK-INVOKE] Falling back to model #%d: %s", idx+1, model_name)
+                result = self._try_invoke(fallback_model, messages, config)
+                total_elapsed = _time.time() - total_start
+                self.logger.info("[FALLBACK-INVOKE] ✔ Fallback model #%d succeeded, total_time=%.2fs", idx+1, total_elapsed)
+                return result
+            except Exception as e:
+                last_exception = e
+                self.logger.warning("[FALLBACK-INVOKE] ✘ Fallback model #%d failed: %s", idx+1, str(e)[:200])
+        
+        # All models failed
+        total_elapsed = _time.time() - total_start
+        self.logger.error("[FALLBACK-INVOKE] ✘ All models failed after %.2fs, no fallbacks remaining", total_elapsed)
+        raise last_exception
+    
+    def stream(self, messages: Any, config: dict = None):
+        """Stream from the LLM with fallback support.
+        
+        Args:
+            messages: Messages to send to the LLM
+            config: Optional configuration dict
+        
+        Yields:
+            LLM response chunks
+        
+        Raises:
+            Exception: If all models fail
+        """
+        import time as _time
+        config = config or {}
+        last_exception = None
+        
+        total_start = _time.time()
+        self.logger.info("[FALLBACK-STREAM] Starting stream chain, primary=%s, fallbacks=%d",
+                         self.model_name, len(self.fallbacks))
+        
+        # Try primary model first
+        try:
+            self.logger.info("[FALLBACK-STREAM] Attempting primary model stream: %s", self.model_name)
+            yield from self._try_stream(self.primary, messages, config)
+            total_elapsed = _time.time() - total_start
+            self.logger.info("[FALLBACK-STREAM] ✔ Primary model stream succeeded, total_time=%.2fs", total_elapsed)
+            return
+        except Exception as e:
+            last_exception = e
+            if not _is_retryable_error(e):
+                self.logger.warning("[FALLBACK-STREAM] ✘ Primary stream failed with non-retryable error: %s", str(e)[:200])
+                raise
+            self.logger.warning("[FALLBACK-STREAM] ✘ Primary stream failed with retryable error: %s", str(e)[:200])
+        
+        # Try fallback models
+        for idx, (model_name, fallback_model) in enumerate(self.fallbacks):
+            try:
+                self.logger.info("[FALLBACK-STREAM] Falling back to stream from model #%d: %s", idx+1, model_name)
+                yield from self._try_stream(fallback_model, messages, config)
+                total_elapsed = _time.time() - total_start
+                self.logger.info("[FALLBACK-STREAM] ✔ Fallback model #%d stream succeeded, total_time=%.2fs", idx+1, total_elapsed)
+                return
+            except Exception as e:
+                last_exception = e
+                self.logger.warning("[FALLBACK-STREAM] ✘ Fallback model #%d stream failed: %s", idx+1, str(e)[:200])
+        
+        # All models failed
+        total_elapsed = _time.time() - total_start
+        self.logger.error("[FALLBACK-STREAM] ✘ All models failed after %.2fs, no fallbacks remaining", total_elapsed)
+        raise last_exception
+    
+    @property
+    def model_name(self) -> str:
+        """Return the primary model name."""
+        return getattr(self.primary, "model_name", "unknown")
+    
+    def bind_tools(self, tools: Any) -> "FallbackLLM":
+        """Bind tools to all models.
+        
+        Args:
+            tools: Tool definitions to bind
+        
+        Returns:
+            New FallbackLLM with tools bound
+        """
+        bound_primary = self.primary.bind_tools(tools)
+        bound_fallbacks = [
+            (name, fallback.bind_tools(tools)) 
+            for name, fallback in self.fallbacks
+        ]
+        return FallbackLLM(bound_primary, bound_fallbacks)

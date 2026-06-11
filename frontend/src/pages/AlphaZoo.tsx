@@ -40,6 +40,8 @@ import {
 import { echarts } from "@/lib/echarts";
 import { getChartTheme } from "@/lib/chart-theme";
 import { useDarkMode } from "@/hooks/useDarkMode";
+import { useTranslation } from "@/lib/i18n";
+
 
 /* ---------- Constants ---------- */
 
@@ -133,6 +135,7 @@ export function AlphaZoo() {
 /* ---------- Browse view ---------- */
 
 function BrowseView() {
+  const { t } = useTranslation();
   const [alphas, setAlphas] = useState<AlphaSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [zooFilter, setZooFilter] = useState<string>("");
@@ -175,7 +178,7 @@ function BrowseView() {
       })
       .catch((err: unknown) => {
         if (!alive) return;
-        const msg = err instanceof Error ? err.message : "Failed to load alphas";
+        const msg = err instanceof Error ? err.message : t("alphaZoo.loadingAlphas");
         toast.error(msg);
         setAlphas([]);
         setTotal(0);
@@ -217,10 +220,7 @@ function BrowseView() {
           {total > 0 ? total : 452} pre-built quant alphas across 4 zoos
         </h1>
         <p className="text-sm text-muted-foreground max-w-2xl">
-          Browse formula-driven cross-sectional signals from Qlib, the
-          Kakushadze 101 set, GTJA 191, and the academic anomaly literature.
-          Click any alpha to read its formula and source code, or run a bench
-          to score the whole zoo on a universe and period.
+          {t("alphaZoo.heroDesc")}
         </p>
       </div>
 
@@ -296,7 +296,7 @@ function BrowseView() {
         </div>
         <div className="md:w-40">
           <label htmlFor="alpha-theme-filter" className="text-xs text-muted-foreground block mb-1">
-            Theme
+            {t("alphaZoo.theme")}
           </label>
           <select
             id="alpha-theme-filter"
@@ -304,7 +304,7 @@ function BrowseView() {
             onChange={(e) => setThemeFilter(e.target.value)}
             className="w-full px-3 py-2 rounded-lg border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
           >
-            <option value="">All themes</option>
+            <option value="">{t("alphaZoo.allThemes")}</option>
             {themeOptions.map((tname) => (
               <option key={tname} value={tname}>
                 {tname}
@@ -335,7 +335,7 @@ function BrowseView() {
           className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg border text-sm font-medium hover:bg-muted hover:text-foreground transition"
           title="Tick 2+ alphas below, then compare them head-to-head"
         >
-          <ArrowLeftRight className="h-3.5 w-3.5" aria-hidden="true" /> Compare
+          <ArrowLeftRight className="h-3.5 w-3.5" aria-hidden="true" /> {t("alphaZoo.compare")}
           {selected.size >= 2 ? ` (${selected.size})` : ""}
         </Link>
         <Link
@@ -350,7 +350,7 @@ function BrowseView() {
       {/* TODO(v0.2): switch to react-window if alpha count exceeds 5000 */}
       <div className="border rounded-xl overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-sm" aria-label="Alpha catalogue">
+          <table className="w-full text-sm" aria-label={t("alphaZoo.catalogue")}>
             <caption className="sr-only">Alpha catalogue</caption>
             <thead>
               <tr className="border-b bg-muted/40">
@@ -763,8 +763,7 @@ function BenchView() {
           Score a zoo on a universe
         </h1>
         <p className="text-sm text-muted-foreground max-w-2xl">
-          Computes IC / IR for every alpha in the selected zoo over the chosen
-          universe and period, then bucketizes them as alive / reversed / dead.
+          Computes IC / IR for every alpha in the selected zoo over the chosen universe and period, then bucketizes them as alive / reversed / dead.
         </p>
       </div>
 
@@ -1220,9 +1219,7 @@ function CompareView() {
           Compare alphas side by side
         </h1>
         <p className="text-sm text-muted-foreground max-w-2xl">
-          Benches just the alphas you pick on a universe and period, then ranks
-          them by IC / IR with the gap to the leader — far faster than benching a
-          whole zoo when you only care about a shortlist.
+          Benches just the alphas you pick on a universe and period, then ranks them by IC / IR with the gap to the leader — far faster than benching a whole zoo when you only care about a shortlist.
         </p>
       </div>
 
@@ -1241,8 +1238,7 @@ function CompareView() {
             className="w-full px-3 py-2 rounded-lg border bg-background text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50"
           />
           <p className="text-[11px] text-muted-foreground mt-1">
-            Separate ids with commas or spaces. Tip: tick alphas in the catalogue
-            and hit “Compare” to prefill this.
+            Separate ids with commas or spaces. Tip: tick alphas in the catalogue and hit "Compare" to prefill this.
           </p>
         </div>
 

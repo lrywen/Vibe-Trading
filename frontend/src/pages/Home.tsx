@@ -1,30 +1,32 @@
 import { Link } from "react-router-dom";
 import { ArrowRight, Bot, BarChart3, Zap, UserCircle2 } from "lucide-react";
+import { useTranslation } from "@/lib/i18n";
 
 export function Home() {
+  const { t } = useTranslation();
   const FEATURES = [
-    { icon: Bot, title: "AI Agent", desc: "Natural language strategy generation with ReAct reasoning" },
-    { icon: BarChart3, title: "Built-in Backtest", desc: "7 data sources across A-shares, US/HK & Crypto" },
-    { icon: Zap, title: "Real-time Streaming", desc: "Watch the agent think, call tools, and iterate" },
-    { icon: UserCircle2, title: "Strategy Replay", desc: "Trade journal analyzer + Shadow Account — extract your rules, backtest them, attribute PnL delta" },
+    { icon: Bot, title: t("home.features.agentTitle"), desc: t("home.features.agentDesc") },
+    { icon: BarChart3, title: t("home.features.backtestTitle"), desc: t("home.features.backtestDesc") },
+    { icon: Zap, title: t("home.features.streamingTitle"), desc: t("home.features.streamingDesc") },
+    { icon: UserCircle2, title: t("home.features.replayTitle"), desc: t("home.features.replayDesc") },
   ];
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen p-8">
-      <div className="max-w-2xl text-center space-y-6">
-        <h1 className="text-4xl font-bold tracking-tight">AI-Powered Quant Strategy Research</h1>
-        <p className="text-lg text-muted-foreground">Describe a trading strategy in natural language. The agent generates code, runs backtests, and optimizes — all in real time.</p>
+    <div className="flex min-h-full flex-col items-center justify-center px-4 py-10 sm:p-8">
+      <div className="max-w-2xl text-center space-y-5 sm:space-y-6">
+        <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">{t("home.title")}</h1>
+        <p className="text-base text-muted-foreground sm:text-lg">{t("home.subtitle")}</p>
         <Link
           to="/agent"
           className="inline-flex items-center gap-2 px-6 py-3 rounded-lg bg-primary text-primary-foreground font-medium hover:opacity-90 transition"
         >
-          Start Research <ArrowRight className="h-4 w-4" />
+          {t("home.startResearch")} <ArrowRight className="h-4 w-4" />
         </Link>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mt-16 max-w-5xl w-full">
+      <div className="grid w-full max-w-5xl grid-cols-1 gap-4 mt-10 sm:gap-6 sm:mt-16 md:grid-cols-2 lg:grid-cols-4">
         {FEATURES.map(({ icon: Icon, title, desc }) => (
-          <div key={title} className="border rounded-lg p-6 space-y-3">
+          <div key={title} className="border rounded-lg p-5 sm:p-6 space-y-3">
             <Icon className="h-8 w-8 text-primary" />
             <h3 className="font-semibold">{title}</h3>
             <p className="text-sm text-muted-foreground">{desc}</p>

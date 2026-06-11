@@ -47,9 +47,9 @@ agents:
       5. **Top picks** — 3-5 tickers in BTC-USDT format with direction and rationale
       6. **Volatility** — realized vs implied, positioning extremes, liquidation risk zones
 
-      Use load_skill for OKX market data, funding rate analysis, and stablecoin flow patterns.
+      Use load_skill for Gate.io/CCXT market data, funding rate analysis, and stablecoin flow patterns.
     tools: [bash, read_file, write_file, load_skill]
-    skills: [okx-market, perp-funding-basis, stablecoin-flow, crypto-derivatives, volatility, onchain-analysis]
+    skills: [ccxt, perp-funding-basis, stablecoin-flow, crypto-derivatives, volatility, onchain-analysis]
     max_iterations: 50
     timeout_seconds: 1800
     max_retries: 1

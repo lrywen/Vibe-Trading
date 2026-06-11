@@ -46,8 +46,53 @@ def _first_proxy_env(*names: str) -> str:
     return ""
 
 
-def _ccxt_proxy_config() -> dict[str, str]:
-    """Build CCXT proxy settings from conventional proxy environment variables."""
+# 代理配置
+SOCKS5_PROXY = os.environ.get("SOCKS5_PROXY", "socks5h://127.0.0.1:1080")
+
+# 境外交易所域名清单（强制走代理）
+_FOREIGN_EXCHANGES = {
+    "binance.com", "binance.us", "coinbase.com", "kraken.com", "kucoin.com",
+    "gate.io", "huobi.com", "okx.com", "mexc.com", "bybit.com", "bitget.com",
+    "ftx.com", "coinmetro.com",
+}
+
+
+def _ccxt_proxy_config(exchange_id: str) -> dict[str, str]:
+    """Build CCXT proxy settings with intelligent routing.
+    
+    根据交易所域名智能判断是否使用代理：
+    - 境外交易所：强制使用 SOCKS5H 代理
+    - 境内交易所：直接连接
+    
+    Args:
+        exchange_id: CCXT exchange identifier (e.g., 'binance', 'gate')
+    """
+    # 获取交易所对应的域名
+    exchange_domains = {
+        "binance": "binance.com",
+        "binanceus": "binance.us",
+        "coinbasepro": "coinbase.com",
+        "kraken": "kraken.com",
+        "kucoin": "kucoin.com",
+        "gate": "gate.io",
+        "huobipro": "huobi.com",
+        "okex": "okx.com",
+        "mexc": "mexc.com",
+        "bybit": "bybit.com",
+        "bitget": "bitget.com",
+        "ftx": "ftx.com",
+    }
+    
+    domain = exchange_domains.get(exchange_id.lower())
+    
+    if domain and domain in _FOREIGN_EXCHANGES:
+        logger.info(f"境外交易所 {exchange_id} ({domain})，使用代理: {SOCKS5_PROXY}")
+        return {
+            "http": SOCKS5_PROXY,
+            "https": SOCKS5_PROXY,
+        }
+    
+    # 检查全局代理环境变量
     all_proxy = _first_proxy_env("ALL_PROXY", "all_proxy")
     http_proxy = _first_proxy_env("HTTP_PROXY", "http_proxy") or all_proxy
     https_proxy = _first_proxy_env("HTTPS_PROXY", "https_proxy") or all_proxy or http_proxy
@@ -57,6 +102,10 @@ def _ccxt_proxy_config() -> dict[str, str]:
         proxies["http"] = http_proxy
     if https_proxy:
         proxies["https"] = https_proxy
+    
+    if proxies:
+        logger.info(f"使用全局代理配置: {proxies}")
+    
     return proxies
 
 
@@ -80,16 +129,17 @@ class DataLoader:
         pass
 
     def _get_exchange(self):
-        """Create exchange instance."""
+        """Create exchange instance with intelligent proxy routing."""
         import ccxt
-        exchange_id = os.getenv("CCXT_EXCHANGE", "binance").lower()
+        exchange_id = os.getenv("CCXT_EXCHANGE", "gate").lower()
         exchange_cls = getattr(ccxt, exchange_id, None)
         if exchange_cls is None:
             logger.warning("Unknown CCXT exchange %s, falling back to binance", exchange_id)
+            exchange_id = "binance"
             exchange_cls = ccxt.binance
 
         config = {"enableRateLimit": True, "timeout": _CCXT_TIMEOUT_MS}
-        proxies = _ccxt_proxy_config()
+        proxies = _ccxt_proxy_config(exchange_id)
         if proxies:
             config["proxies"] = proxies
         return exchange_cls(config)

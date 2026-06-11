@@ -1,6 +1,7 @@
 import { memo } from "react";
 import { cn } from "@/lib/utils";
-import { getMetricLabel, DISPLAY_ORDER, formatMetricVal, metricSentiment } from "@/lib/formatters";
+import { getMetricLabel, METRIC_LABEL_KEYS, DISPLAY_ORDER, formatMetricVal, metricSentiment } from "@/lib/formatters";
+import { useTranslation } from "@/lib/i18n";
 
 const SENTIMENT = {
   positive: "text-success",
@@ -14,6 +15,7 @@ interface Props {
 }
 
 export const MetricsCard = memo(function MetricsCard({ metrics, compact = false }: Props) {
+  const { t } = useTranslation();
   const entries = DISPLAY_ORDER
     .filter((k) => metrics[k] != null)
     .map((k) => ({ k, v: metrics[k] }));
@@ -30,7 +32,7 @@ export const MetricsCard = memo(function MetricsCard({ metrics, compact = false 
       {shown.map(({ k, v }) => (
         <div key={k} className="text-center py-1">
           <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-medium">
-            {getMetricLabel(k)}
+            {METRIC_LABEL_KEYS[k]?.includes(".") ? t(METRIC_LABEL_KEYS[k]) : getMetricLabel(k)}
           </p>
           <p className={cn(
             "text-sm font-bold font-mono tabular-nums mt-0.5",

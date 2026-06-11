@@ -1,5 +1,6 @@
 import { WifiOff, RefreshCw } from "lucide-react";
 import type { SSEStatus } from "@/hooks/useSSE";
+import { useTranslation } from "@/lib/i18n";
 
 interface Props {
   status: SSEStatus;
@@ -7,6 +8,7 @@ interface Props {
 }
 
 export function ConnectionBanner({ status, retryAttempt }: Props) {
+  const { t } = useTranslation();
   if (status === "connected" || status === "disconnected") return null;
 
   return (
@@ -14,12 +16,12 @@ export function ConnectionBanner({ status, retryAttempt }: Props) {
       {status === "reconnecting" ? (
         <>
           <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-          <span>Connection lost, reconnecting (attempt {retryAttempt || 1})…</span>
+          <span>{t("connection.reconnecting", { attempt: retryAttempt || 1 })}</span>
         </>
       ) : (
         <>
           <WifiOff className="h-3.5 w-3.5" />
-          <span>Connection lost</span>
+          <span>{t("connection.lost")}</span>
         </>
       )}
     </div>

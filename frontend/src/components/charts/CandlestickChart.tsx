@@ -7,6 +7,7 @@ import { getChartTheme } from "@/lib/chart-theme";
 import { abbreviateNum } from "@/lib/formatters";
 import { echarts, CHART_GROUP, connectCharts } from "@/lib/echarts";
 import { useDarkMode } from "@/hooks/useDarkMode";
+import { useTranslation } from "@/lib/i18n";
 
 type Sub = "vol" | "macd" | "rsi" | "kdj";
 type Range = "1M" | "3M" | "6M" | "1Y" | "ALL";
@@ -40,6 +41,7 @@ export function CandlestickChart({ data, markers, indicators, height = 500 }: Pr
   const [overlays, setOverlays] = useState<Set<Overlay>>(new Set(["ma5", "ma20"]));
   const [showMenu, setShowMenu] = useState(false);
   const { dark } = useDarkMode();
+  const { t: tr, lang } = useTranslation();
 
   const toggleOverlay = useCallback((id: Overlay) => {
     setOverlays(prev => {
@@ -209,10 +211,10 @@ export function CandlestickChart({ data, markers, indicators, height = 500 }: Pr
               const chg = close - open;
               const pct = open ? ((chg / open) * 100).toFixed(2) : "0.00";
               const clr = chg >= 0 ? t.upColor : t.downColor;
-              html += `<br/>O: ${open.toFixed(2)}&nbsp; H: ${high.toFixed(2)}`;
-              html += `<br/>L: ${low.toFixed(2)}&nbsp; C: <span style="color:${clr}"><b>${close.toFixed(2)}</b> ${chg >= 0 ? "+" : ""}${chg.toFixed(2)} (${chg >= 0 ? "+" : ""}${pct}%)</span>`;
+              html += `<br/>${tr("charts.open")}: ${open.toFixed(2)}&nbsp; ${tr("charts.high")}: ${high.toFixed(2)}`;
+              html += `<br/>${tr("charts.low")}: ${low.toFixed(2)}&nbsp; ${tr("charts.close")}: <span style="color:${clr}"><b>${close.toFixed(2)}</b> ${chg >= 0 ? "+" : ""}${chg.toFixed(2)} (${chg >= 0 ? "+" : ""}${pct}%)</span>`;
             } else if (p.seriesName === "Vol") {
-              html += `<br/>Vol: ${abbreviateNum(Number(p.value))}`;
+              html += `<br/>${tr("charts.volume")}: ${abbreviateNum(Number(p.value))}`;
             } else if (p.value != null) {
               html += `<br/>${p.marker} ${p.seriesName}: ${Number(p.value).toFixed(2)}`;
             }
@@ -221,7 +223,7 @@ export function CandlestickChart({ data, markers, indicators, height = 500 }: Pr
         },
       },
       toolbox: {
-        feature: { saveAsImage: { title: "Save" }, dataZoom: { title: { zoom: "Zoom", back: "Reset" } }, restore: { title: "Reset" } },
+        feature: { saveAsImage: { title: tr("charts.save") }, dataZoom: { title: { zoom: tr("charts.zoom"), back: tr("charts.reset") } }, restore: { title: tr("charts.reset") } },
         right: 8, top: 0, iconStyle: { borderColor: t.textColor },
       },
       legend: { data: legendNames, textStyle: { color: t.textColor, fontSize: 10 }, right: 80, top: 2, type: "scroll", itemWidth: 12, itemHeight: 8, itemGap: 8 },
@@ -252,7 +254,7 @@ export function CandlestickChart({ data, markers, indicators, height = 500 }: Pr
         ...subSeries,
       ],
     }, true);
-  }, [data, markers, baseData, indicatorCache, extraIndicators, sub, range, overlays, dark]);
+  }, [data, markers, baseData, indicatorCache, extraIndicators, sub, range, overlays, dark, tr, lang]);
 
   if (data.length === 0) {
     return <div className="text-muted-foreground text-sm p-4">No price data</div>;
@@ -280,7 +282,7 @@ export function CandlestickChart({ data, markers, indicators, height = 500 }: Pr
           </button>
           {showMenu && (
             <div className="absolute top-full left-0 mt-1 z-50 bg-card border rounded-lg shadow-lg p-2 min-w-[160px]" onMouseLeave={() => setShowMenu(false)}>
-              {["MA", "Channel"].map(group => (
+              {(["MA", "Channel"] as const).map(group => (
                 <div key={group}>
                   <p className="text-[9px] text-muted-foreground/50 uppercase tracking-wider px-1 pt-1">{group}</p>
                   {OVERLAY_OPTIONS.filter(o => o.group === group).map(o => (

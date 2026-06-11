@@ -1,4 +1,5 @@
-﻿import { Bot, TrendingUp, Globe, Sparkles, Users, UserCircle2, NotebookPen, Landmark } from "lucide-react";
+import { Bot, TrendingUp, Globe, Sparkles, Users, UserCircle2, NotebookPen, Landmark } from "lucide-react";
+import { useTranslation } from "@/lib/i18n";
 
 interface Example {
   title: string;
@@ -168,11 +169,59 @@ const CAPABILITY_CHIPS = [
   "Session Search",
 ];
 
+const CAPABILITY_CHIPS_ZH = [
+  "金融技能库",
+  "多智能体团队",
+  "自动发现工具",
+  "A股 · 加密货币 · 港美股",
+  "交易连接器配置",
+  "分钟级到日线周期",
+  "4类组合优化器",
+  "15+ 风控指标",
+  "期权与衍生品",
+  "PDF 与网页研究",
+  "因子分析与机器学习",
+  "交易日志分析",
+  "影子账户回测",
+  "持久化记忆",
+  "会话搜索",
+];
+
+const CATEGORIES_ZH: Category[] = CATEGORIES.map((cat, idx) => ({
+  ...cat,
+  label: ["多市场回测", "投研分析", "多智能体团队", "文档与网页研究", "交易日志", "交易连接器", "影子账户"][idx],
+  examples: cat.examples.map((ex, exIdx) => ({
+    ...ex,
+    title: [
+      ["跨市场组合", "BTC 5分钟 MACD 策略", "美股科技股最大分散化"],
+      ["多因子 Alpha 模型", "期权 Greeks 分析"],
+      ["投委会评审", "量化策略工作台"],
+      ["分析财报 PDF", "网页研究：宏观展望"],
+      ["分析券商导出记录", "诊断交易行为偏差"],
+      ["检查当前连接器", "分析连接器持仓", "行情与趋势"],
+      ["从交易日志训练影子账户", "我错过了多少收益？", "生成影子报告"],
+    ][idx][exIdx],
+    desc: [
+      ["A股 + 加密货币 + 美股，使用风险平价优化", "分钟级加密货币回测，接入 OKX 实时数据", "通过 yfinance 覆盖 FAANG+ 组合优化"],
+      ["基于 IC 加权合成沪深300多因子", "Black-Scholes 定价与 Delta/Gamma/Theta/Vega 分析"],
+      ["多智能体辩论：多空观点、风控复核、PM 决策", "选股筛选 → 因子研究 → 回测 → 风控审计流程"],
+      ["上传 PDF 并针对财务数据提问", "读取实时网页来源，生成宏观分析"],
+      ["解析同花顺/东财/富途/通用 CSV，统计持仓天数、胜率、盈亏比", "处置效应、过度交易、追涨、锚定偏差诊断"],
+      ["列出连接器配置并验证当前选中项", "读取账户摘要和持仓，评估集中度、现金和组合风险", "通过当前连接器获取报价和近期日线"],
+      ["从券商 CSV 提取你的交易规则并保存影子画像", "回测影子策略并归因实际 PnL 差异", "生成 8 部分 HTML/PDF 报告"],
+    ][idx][exIdx],
+  })),
+}));
+
 interface Props {
   onExample: (s: string) => void;
 }
 
 export function WelcomeScreen({ onExample }: Props) {
+  const { t, lang } = useTranslation();
+  const displayCategories = lang === "zh" ? CATEGORIES_ZH : CATEGORIES;
+  const capabilityChips = lang === "zh" ? CAPABILITY_CHIPS_ZH : CAPABILITY_CHIPS;
+
   return (
     <div className="flex flex-col items-center justify-center min-h-[60vh] space-y-8 text-center">
       {/* Header */}
@@ -183,7 +232,7 @@ export function WelcomeScreen({ onExample }: Props) {
         <div>
           <h2 className="text-2xl font-bold tracking-tight">Vibe-Trading</h2>
           <p className="text-xs text-muted-foreground mt-1 max-w-sm mx-auto leading-relaxed">
-            vibe trading with your professional financial agent team
+            {t("agent.welcomeSubtitle")}
           </p>
           <p className="text-sm text-muted-foreground mt-2 max-w-md leading-relaxed mx-auto">
             Describe a trading strategy to get started.
@@ -193,7 +242,7 @@ export function WelcomeScreen({ onExample }: Props) {
 
       {/* Capability chips */}
       <div className="flex flex-wrap justify-center gap-2 max-w-lg">
-        {CAPABILITY_CHIPS.map((chip) => (
+        {capabilityChips.map((chip) => (
           <span
             key={chip}
             className="px-2.5 py-1 text-xs rounded-full border border-border/60 text-muted-foreground bg-muted/30"
@@ -205,9 +254,9 @@ export function WelcomeScreen({ onExample }: Props) {
 
       {/* Example categories grid */}
       <div className="w-full max-w-2xl text-left space-y-4">
-        <p className="text-xs text-muted-foreground px-1">Try an example:</p>
+        <p className="text-xs text-muted-foreground px-1">{t("agent.tryExample")}</p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          {CATEGORIES.map((cat) => (
+          {displayCategories.map((cat) => (
             <div key={cat.label} className="space-y-2">
               <div className={`flex items-center gap-1.5 text-xs font-medium px-1 ${cat.color.split(" ").filter(c => c.startsWith("text-")).join(" ")}`}>
                 {cat.icon}

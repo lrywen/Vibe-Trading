@@ -5,11 +5,12 @@ import { api, type RunListItem, type RunData, type EquityPoint } from "@/lib/api
 import { echarts, CHART_GROUP, connectCharts } from "@/lib/echarts";
 import { getChartTheme } from "@/lib/chart-theme";
 import { useDarkMode } from "@/hooks/useDarkMode";
+import { useTranslation } from "@/lib/i18n";
 import { SkeletonChart, SkeletonMetrics } from "@/components/common/Skeleton";
 
 interface MetricDef {
   key: string;
-  label: string;
+  labelKey: string;
   type: "pct" | "num" | "int" | "days";
   higherIsBetter: boolean;
 }
@@ -51,24 +52,23 @@ function runLabel(r: RunListItem): string {
 }
 
 const METRICS: MetricDef[] = [
-  { key: "total_return",           label: "Total Return",         type: "pct", higherIsBetter: true },
-  { key: "annualized_return",      label: "Annualized Return",    type: "pct", higherIsBetter: true },
-  { key: "sharpe",                 label: "Sharpe Ratio",         type: "num", higherIsBetter: true },
-  { key: "calmar_ratio",           label: "Calmar Ratio",         type: "num", higherIsBetter: true },
-  { key: "sortino_ratio",          label: "Sortino Ratio",        type: "num", higherIsBetter: true },
-  { key: "max_drawdown",           label: "Max Drawdown",         type: "pct", higherIsBetter: false },
-  { key: "volatility",             label: "Volatility",           type: "pct", higherIsBetter: false },
-  { key: "win_rate",               label: "Win Rate",             type: "pct", higherIsBetter: true },
-  { key: "profit_factor",          label: "Profit Factor",        type: "num", higherIsBetter: true },
-  { key: "avg_win",                label: "Avg Win",              type: "pct", higherIsBetter: true },
-  { key: "avg_loss",               label: "Avg Loss",             type: "pct", higherIsBetter: false },
-  { key: "trade_count",            label: "Trades",               type: "int", higherIsBetter: true },
-  { key: "max_consecutive_losses", label: "Max Consec. Losses",   type: "int", higherIsBetter: false },
-  { key: "exposure_time",          label: "Exposure Time",        type: "pct", higherIsBetter: true },
-  { key: "avg_holding_period",     label: "Avg Holding Period",   type: "days", higherIsBetter: false },
+  { key: "total_return", labelKey: "compare.metrics.totalReturn", type: "pct", higherIsBetter: true },
+  { key: "annualized_return", labelKey: "compare.metrics.annualizedReturn", type: "pct", higherIsBetter: true },
+  { key: "sharpe", labelKey: "compare.metrics.sharpe", type: "num", higherIsBetter: true },
+  { key: "calmar_ratio", labelKey: "compare.metrics.calmar", type: "num", higherIsBetter: true },
+  { key: "sortino_ratio", labelKey: "compare.metrics.sortino", type: "num", higherIsBetter: true },
+  { key: "max_drawdown", labelKey: "compare.metrics.maxDrawdown", type: "pct", higherIsBetter: false },
+  { key: "volatility", labelKey: "compare.metrics.volatility", type: "pct", higherIsBetter: false },
+  { key: "win_rate", labelKey: "compare.metrics.winRate", type: "pct", higherIsBetter: true },
+  { key: "profit_factor", labelKey: "compare.metrics.profitFactor", type: "num", higherIsBetter: true },
+  { key: "avg_win", labelKey: "compare.metrics.avgWin", type: "pct", higherIsBetter: true },
+  { key: "avg_loss", labelKey: "compare.metrics.avgLoss", type: "pct", higherIsBetter: false },
+  { key: "trade_count", labelKey: "compare.metrics.trades", type: "int", higherIsBetter: true },
+  { key: "max_consecutive_losses", labelKey: "compare.metrics.maxConsecutiveLosses", type: "int", higherIsBetter: false },
+  { key: "exposure_time", labelKey: "compare.metrics.exposureTime", type: "pct", higherIsBetter: true },
+  { key: "avg_holding_period", labelKey: "compare.metrics.avgHoldingPeriod", type: "days", higherIsBetter: false },
 ];
 
-// Also accept backend aliases
 const METRIC_ALIASES: Record<string, string> = {
   annual_return: "annualized_return",
   calmar: "calmar_ratio",
@@ -83,7 +83,6 @@ const METRIC_ALIASES: Record<string, string> = {
 function resolveMetric(metrics: Record<string, number> | null, key: string): number | undefined {
   if (!metrics) return undefined;
   if (metrics[key] !== undefined) return metrics[key];
-  // Check if any alias maps to this key
   for (const [alias, canonical] of Object.entries(METRIC_ALIASES)) {
     if (canonical === key && metrics[alias] !== undefined) return metrics[alias];
   }
@@ -110,13 +109,11 @@ function EquityChartOverlay({ leftCurve, rightCurve, leftLabel, rightLabel }: Eq
     chart.group = CHART_GROUP;
     connectCharts();
 
-    // Merge dates from both curves and sort
     const dateSet = new Set<string>();
     for (const p of leftCurve) dateSet.add(p.time);
     for (const p of rightCurve) dateSet.add(p.time);
     const dates = Array.from(dateSet).sort();
 
-    // Build lookup maps
     const leftMap = new Map(leftCurve.map((p) => [p.time, Number(p.equity)]));
     const rightMap = new Map(rightCurve.map((p) => [p.time, Number(p.equity)]));
 
@@ -134,11 +131,10 @@ function EquityChartOverlay({ leftCurve, rightCurve, leftLabel, rightLabel }: Eq
         backgroundColor: t.tooltipBg,
         borderColor: t.tooltipBorder,
         textStyle: { color: t.tooltipText, fontSize: 11 },
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        formatter: (params: any) => {
+        formatter: (params: unknown) => {
           if (!Array.isArray(params) || !params.length) return "";
-          let html = `<b>${params[0].axisValue}</b>`;
-          for (const p of params) {
+          let html = `<b>${(params[0] as { axisValue: string }).axisValue}</b>`;
+          for (const p of params as Array<{ marker: string; seriesName: string; value: unknown }>) {
             if (p.value == null) continue;
             html += `<br/>${p.marker} ${p.seriesName}: <b>${Number(p.value).toLocaleString()}</b>`;
           }
@@ -197,6 +193,7 @@ function EquityChartOverlay({ leftCurve, rightCurve, leftLabel, rightLabel }: Eq
 }
 
 export function Compare() {
+  const { t } = useTranslation();
   const [runs, setRuns] = useState<RunListItem[]>([]);
   const [leftId, setLeftId] = useState("");
   const [rightId, setRightId] = useState("");
@@ -247,37 +244,37 @@ export function Compare() {
   const rightRun = runs.find((r) => r.run_id === rightId);
   const loading = leftLoading || rightLoading;
   const hasData = Boolean(leftData || rightData);
+  const baselineLabel = t("compare.baseline");
+  const compareLabel = t("compare.compare");
 
   return (
     <div className="p-8 max-w-4xl space-y-6">
       <h1 className="text-xl font-bold flex items-center gap-2">
-        <GitCompare className="h-5 w-5" /> Strategy Comparison
+        <GitCompare className="h-5 w-5" /> {t("compare.title")}
       </h1>
 
-      {/* Selectors */}
       <div className="flex gap-4 items-end">
         <div className="flex-1">
-          <label className="text-xs text-muted-foreground block mb-1">Baseline</label>
+          <label className="text-xs text-muted-foreground block mb-1">{baselineLabel}</label>
           <select value={leftId} onChange={(e) => setLeftId(e.target.value)} className="w-full px-3 py-2 rounded-lg border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/30" title={leftRun?.prompt || leftId}>
-            <option value="">-- Select --</option>
+            <option value="">{t("common.select")}</option>
             {runs.map((r) => <option key={r.run_id} value={r.run_id}>{runLabel(r)} ({r.status})</option>)}
           </select>
         </div>
         <ArrowRight className="h-5 w-5 text-muted-foreground mb-2 shrink-0" />
         <div className="flex-1">
-          <label className="text-xs text-muted-foreground block mb-1">Compare</label>
+          <label className="text-xs text-muted-foreground block mb-1">{compareLabel}</label>
           <select value={rightId} onChange={(e) => setRightId(e.target.value)} className="w-full px-3 py-2 rounded-lg border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/30" title={rightRun?.prompt || rightId}>
-            <option value="">-- Select --</option>
+            <option value="">{t("common.select")}</option>
             {runs.map((r) => <option key={r.run_id} value={r.run_id}>{runLabel(r)} ({r.status})</option>)}
           </select>
         </div>
       </div>
 
-      {/* Loading state — show skeletons while a selected run's data is in flight */}
       {loading && !hasData && (
         <div className="space-y-6">
           <div className="border rounded-xl p-4">
-            <h2 className="text-sm font-medium text-muted-foreground mb-2">Equity & Drawdown</h2>
+            <h2 className="text-sm font-medium text-muted-foreground mb-2">{t("compare.equityDrawdown")}</h2>
             <SkeletonChart height={320} />
           </div>
           <div className="border rounded-xl overflow-hidden">
@@ -286,38 +283,36 @@ export function Compare() {
         </div>
       )}
 
-      {/* Equity curve overlay */}
       {(leftCurve.length > 0 || rightCurve.length > 0) && (
         <div className="border rounded-xl p-4">
-          <h2 className="text-sm font-medium text-muted-foreground mb-2">Equity & Drawdown</h2>
+          <h2 className="text-sm font-medium text-muted-foreground mb-2">{t("compare.equityDrawdown")}</h2>
           <EquityChartOverlay
             leftCurve={leftCurve}
             rightCurve={rightCurve}
-            leftLabel={leftRun ? truncatePrompt(leftRun.prompt, 20) || "Baseline" : "Baseline"}
-            rightLabel={rightRun ? truncatePrompt(rightRun.prompt, 20) || "Compare" : "Compare"}
+            leftLabel={leftRun ? truncatePrompt(leftRun.prompt, 20) || baselineLabel : baselineLabel}
+            rightLabel={rightRun ? truncatePrompt(rightRun.prompt, 20) || compareLabel : compareLabel}
           />
         </div>
       )}
 
-      {/* Metrics table */}
       {(leftData || rightData) && (
         <div className="border rounded-xl overflow-hidden">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b bg-muted/40">
-                <th className="text-left px-4 py-2.5 text-muted-foreground font-medium">Metric</th>
-                <th className="text-right px-4 py-2.5 text-muted-foreground font-medium">Baseline</th>
-                <th className="text-right px-4 py-2.5 text-muted-foreground font-medium">Compare</th>
-                <th className="text-right px-4 py-2.5 text-muted-foreground font-medium">Delta</th>
+                <th className="text-left px-4 py-2.5 text-muted-foreground font-medium">{t("compare.metric")}</th>
+                <th className="text-right px-4 py-2.5 text-muted-foreground font-medium">{baselineLabel}</th>
+                <th className="text-right px-4 py-2.5 text-muted-foreground font-medium">{compareLabel}</th>
+                <th className="text-right px-4 py-2.5 text-muted-foreground font-medium">{t("compare.delta")}</th>
               </tr>
             </thead>
             <tbody>
-              {METRICS.map(({ key, label, type, higherIsBetter }) => {
+              {METRICS.map(({ key, labelKey, type, higherIsBetter }) => {
                 const lv = resolveMetric(leftData, key);
                 const rv = resolveMetric(rightData, key);
                 return (
                   <tr key={key} className="border-b last:border-0 hover:bg-muted/20">
-                    <td className="px-4 py-2.5 font-medium">{label}</td>
+                    <td className="px-4 py-2.5 font-medium">{t(labelKey)}</td>
                     <td className="px-4 py-2.5 text-right font-mono tabular-nums">{fmt(lv, type)}</td>
                     <td className="px-4 py-2.5 text-right font-mono tabular-nums">{fmt(rv, type)}</td>
                     <td className={cn("px-4 py-2.5 text-right font-mono tabular-nums font-semibold", diffClass(lv, rv, higherIsBetter))}>{diffStr(lv, rv, type)}</td>
@@ -332,7 +327,7 @@ export function Compare() {
       {!hasData && !loading && (
         <div className="text-center py-16 text-muted-foreground">
           <GitCompare className="h-12 w-12 mx-auto mb-3 opacity-20" />
-          <p className="text-sm">Select two runs to compare their metrics.</p>
+          <p className="text-sm">{t("compare.empty")}</p>
         </div>
       )}
     </div>

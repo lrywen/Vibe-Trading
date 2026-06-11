@@ -1,3 +1,21 @@
+export const METRIC_LABEL_KEYS: Record<string, string> = {
+  total_return: "compare.metrics.totalReturn",
+  annual_return: "compare.metrics.annualizedReturn",
+  sharpe: "compare.metrics.sharpe",
+  max_drawdown: "compare.metrics.maxDrawdown",
+  win_rate: "compare.metrics.winRate",
+  trade_count: "compare.metrics.trades",
+  final_value: "Final Value",
+  calmar: "compare.metrics.calmar",
+  sortino: "compare.metrics.sortino",
+  profit_loss_ratio: "compare.metrics.profitFactor",
+  max_consecutive_loss: "compare.metrics.maxConsecutiveLosses",
+  avg_holding_days: "compare.metrics.avgHoldingPeriod",
+  benchmark_return: "Benchmark",
+  excess_return: "Excess Return",
+  information_ratio: "IR",
+};
+
 export const METRIC_LABELS: Record<string, string> = {
   total_return: "Total Return",
   annual_return: "Annual",

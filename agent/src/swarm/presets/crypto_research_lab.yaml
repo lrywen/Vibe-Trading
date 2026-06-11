@@ -51,7 +51,7 @@ agents:
         - SOPR retesting 1.0: bull market pullback support / bear market rally resistance
       - **Puell Multiple**: Miner revenue vs. historical average; extreme lows = bottom, extreme highs = top
 
-      Use load_skill("onchain-analysis") for on-chain analysis standards; load_skill("okx-market") for exchange data interfaces.
+      Use load_skill("onchain-analysis") for on-chain analysis standards; load_skill("ccxt") for exchange data interfaces.
 
       ## Output Requirements
       1. **On-Chain Health Composite Score** — 1–10 (10 = extremely healthy / bottom opportunity; 1 = extreme bubble / top risk), with scoring rationale
@@ -61,7 +61,7 @@ agents:
       5. **Activity and Adoption Trends** — Recent trends in active addresses / new addresses / on-chain transaction volume; assess whether there is organic growth support
       6. **On-Chain Composite Directional Signal** — Explicitly give a "{timeframe} bullish / bearish / neutral" on-chain signal with confidence level
     tools: [bash, read_file, write_file, load_skill]
-    skills: [onchain-analysis, okx-market, stablecoin-flow]
+    skills: [onchain-analysis, ccxt, stablecoin-flow]
     max_iterations: 50
     timeout_seconds: 1800
     max_retries: 1
@@ -162,7 +162,7 @@ agents:
       - **Whale Large Transfers**: On-chain large transfers (>1000 BTC) to exchanges — abnormal signals
       - **Stablecoin Flows**: Large USDT minting by Tether/Circle implies fresh capital waiting to buy
 
-      Use load_skill("sentiment-analysis") for sentiment analysis standards; load_skill("okx-market") for derivatives data.
+      Use load_skill("sentiment-analysis") for sentiment analysis standards; load_skill("ccxt") for derivatives data.
       Use the read_url tool to access real-time sentiment data from CoinGlass, CoinGecko Fear & Greed, and similar sources.
 
       ## Output Requirements
@@ -173,7 +173,7 @@ agents:
       5. **Extreme Sentiment Warning** — Whether extreme greed or extreme fear signals are present; historical average returns following similar signals
       6. **Sentiment Directional Signal** — Provide {timeframe} timing guidance from a sentiment perspective; explicitly state whether the view is "momentum-following" or "contrarian"
     tools: [bash, read_file, write_file, load_skill, read_url]
-    skills: [sentiment-analysis, okx-market, perp-funding-basis, liquidation-heatmap]
+    skills: [sentiment-analysis, ccxt, perp-funding-basis, liquidation-heatmap]
     max_iterations: 50
     timeout_seconds: 1800
     max_retries: 1

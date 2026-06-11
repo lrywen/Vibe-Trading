@@ -10,6 +10,7 @@ from src.trading.connectors.alpaca.profiles import ALPACA_PROFILES
 from src.trading.connectors.binance.profiles import BINANCE_PROFILES
 from src.trading.connectors.dhan.profiles import DHAN_PROFILES
 from src.trading.connectors.futu.profiles import FUTU_PROFILES
+from src.trading.connectors.gate.profiles import GATE_PROFILES
 from src.trading.connectors.ibkr.profiles import IBKR_PROFILES
 from src.trading.connectors.longbridge.profiles import LONGBRIDGE_PROFILES
 from src.trading.connectors.okx.profiles import OKX_PROFILES
@@ -19,9 +20,10 @@ from src.trading.connectors.tiger.profiles import TIGER_PROFILES
 from src.trading.types import TradingProfile
 
 CONFIG_FILENAME = "trading-connections.json"
-DEFAULT_PROFILE_ID = "ibkr-paper-local"
+DEFAULT_PROFILE_ID = "gate-live-sdk-readonly"
 
 BUILTIN_PROFILES: tuple[TradingProfile, ...] = (
+    *GATE_PROFILES,
     *IBKR_PROFILES,
     *ROBINHOOD_PROFILES,
     *TIGER_PROFILES,

@@ -23,7 +23,7 @@ agents:
 
       Use load_skill to access data query methods; prioritize using tools to obtain the latest data to support the analysis.
     tools: [bash, read_file, write_file, load_skill, read_url]
-    skills: [tushare, okx-market, yfinance, web-reader, global-macro]
+    skills: [tushare, ccxt, yfinance, web-reader, global-macro]
     max_iterations: 50
     timeout_seconds: 1800
     max_retries: 1

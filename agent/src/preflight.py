@@ -119,7 +119,17 @@ def _check_llm_provider() -> CheckResult:
 
 
 def _check_okx() -> CheckResult:
-    """Check OKX public API reachability."""
+    """Check OKX public API reachability (fallback for crypto)."""
+    exchange_id = os.environ.get("CCXT_EXCHANGE", "gate").lower()
+    
+    if exchange_id:
+        return CheckResult(
+            name="OKX API",
+            status="hidden",
+            message=f"using CCXT ({exchange_id}) as primary",
+            impact="OKX is fallback only",
+        )
+    
     try:
         import requests
 
@@ -212,17 +222,119 @@ def _check_akshare() -> CheckResult:
 
 
 def _check_ccxt() -> CheckResult:
-    """Check ccxt availability."""
+    """Check ccxt availability and configured exchange connectivity."""
     try:
-        import ccxt  # noqa: F401
+        import ccxt
     except ImportError:
         return CheckResult(
             name="ccxt",
             status="skipped",
             message="package not installed",
-            impact="crypto fallback unavailable",
+            impact="crypto data unavailable",
         )
-    return CheckResult(name="ccxt", status="ready", message="installed", impact="")
+
+    exchange_id = os.environ.get("CCXT_EXCHANGE", "gate").lower()
+    
+    if exchange_id == "gate":
+        api_key = os.environ.get("GATE_API_KEY", "") or os.environ.get("CCXT_API_KEY", "")
+        api_secret = os.environ.get("GATE_API_SECRET", "") or os.environ.get("CCXT_SECRET", "")
+        has_credentials = bool(api_key) and bool(api_secret)
+        
+        try:
+            exchange = ccxt.gate({
+                "enableRateLimit": True,
+                "apiKey": api_key,
+                "secret": api_secret,
+            })
+            
+            ticker = exchange.fetch_ticker("BTC/USDT")
+            if ticker and ticker.get("last"):
+                msg = f"Ready (authenticated)" if has_credentials else f"Ready (public)"
+                return CheckResult(
+                    name=f"CCXT (Gate.io)",
+                    status="ready",
+                    message=msg,
+                    impact="",
+                )
+            return CheckResult(
+                name=f"CCXT (Gate.io)",
+                status="error",
+                message="No ticker data received",
+                impact="crypto data unavailable",
+            )
+        except Exception as exc:
+            error_msg = str(exc)
+            if any(keyword in error_msg.lower() for keyword in ["connection", "timeout", "network", "proxy"]):
+                return CheckResult(
+                    name=f"CCXT (Gate.io)",
+                    status="error",
+                    message=f"Network error: {type(exc).__name__}",
+                    impact="Check network connectivity or proxy configuration",
+                )
+            elif "authentication" in error_msg.lower() or "invalid" in error_msg.lower():
+                return CheckResult(
+                    name=f"CCXT (Gate.io)",
+                    status="error",
+                    message=f"Authentication failed",
+                    impact="Check API key and secret",
+                )
+            else:
+                return CheckResult(
+                    name=f"CCXT (Gate.io)",
+                    status="error",
+                    message=f"{type(exc).__name__}: {exc}",
+                    impact="crypto data unavailable",
+                )
+    
+    elif exchange_id:
+        try:
+            exchange_class = getattr(ccxt, exchange_id, None)
+            if not exchange_class:
+                return CheckResult(
+                    name=f"CCXT ({exchange_id})",
+                    status="error",
+                    message=f"Exchange '{exchange_id}' not supported",
+                    impact="crypto data unavailable",
+                )
+            
+            exchange = exchange_class({"enableRateLimit": True})
+            ticker = exchange.fetch_ticker("BTC/USDT")
+            if ticker and ticker.get("last"):
+                return CheckResult(
+                    name=f"CCXT ({exchange_id})",
+                    status="ready",
+                    message="Ready (public)",
+                    impact="",
+                )
+            return CheckResult(
+                name=f"CCXT ({exchange_id})",
+                status="error",
+                message="No ticker data received",
+                impact="crypto data unavailable",
+            )
+        except Exception as exc:
+            error_msg = str(exc)
+            if any(keyword in error_msg.lower() for keyword in ["connection", "timeout", "network", "proxy"]):
+                return CheckResult(
+                    name=f"CCXT ({exchange_id})",
+                    status="error",
+                    message=f"Network error: {type(exc).__name__}",
+                    impact="Check network connectivity or proxy configuration",
+                )
+            else:
+                return CheckResult(
+                    name=f"CCXT ({exchange_id})",
+                    status="error",
+                    message=f"{type(exc).__name__}: {exc}",
+                    impact="crypto data unavailable",
+                )
+    
+    return CheckResult(
+        name="ccxt",
+        status="ready",
+        message="installed (no exchange configured)",
+        impact="",
+    )
 
 
 # -- Status icons and colors --------------------------------------------------
@@ -232,6 +344,7 @@ _STATUS_DISPLAY = {
     "error": ("[red]FAIL[/red]", "red"),
     "not_configured": ("[yellow]N/A[/yellow]", "yellow"),
     "skipped": ("[dim]SKIP[/dim]", "dim"),
+    "hidden": ("", ""),
 }
 
 
@@ -249,24 +362,25 @@ def run_preflight(console: Optional[Console] = None) -> List[CheckResult]:
 
     checks = [
         _check_llm_provider,
+        _check_ccxt,
         _check_okx,
         _check_yfinance,
         _check_tushare,
         _check_akshare,
-        _check_ccxt,
     ]
 
     results: List[CheckResult] = []
     for check_fn in checks:
         results.append(check_fn())
 
-    # Build display table
+    # Build display table (filter out hidden entries)
+    display_results = [r for r in results if r.status != "hidden"]
     table = Table(show_header=False, show_edge=False, padding=(0, 1), expand=False)
     table.add_column(width=4)   # icon
     table.add_column(width=18)  # name
     table.add_column()          # message
 
-    for r in results:
+    for r in display_results:
         icon, color = _STATUS_DISPLAY[r.status]
         detail = r.message
         if r.status in ("error", "not_configured") and r.impact:
@@ -277,13 +391,31 @@ def run_preflight(console: Optional[Console] = None) -> List[CheckResult]:
     console.print("[bold]Preflight Check[/bold]")
     console.print(table)
 
+    # 显示当前加密货币数据源配置
+    exchange_id = os.environ.get("CCXT_EXCHANGE", "gate").lower()
+    console.print(f"\n[bold]Crypto Data Source Configuration[/bold]")
+    console.print(f"  Primary: [green]CCXT ({exchange_id})[/green]")
+    console.print(f"  Fallback: [yellow]OKX[/yellow]")
+    console.print(f"  Routing: [blue]ccxt > okx[/blue]")
+    
+    # 检查 CCXT 状态并给出降级提示
+    ccxt_result = next((r for r in results if r.name.startswith("CCXT")), None)
+    okx_result = next((r for r in results if r.name == "OKX API"), None)
+    
+    if ccxt_result and ccxt_result.status != "ready":
+        console.print(f"\n[bold yellow]⚠️  Primary data source {ccxt_result.name} unavailable[/bold yellow]")
+        if okx_result and okx_result.status == "ready":
+            console.print(f"   Will fall back to OKX API")
+        else:
+            console.print(f"   OKX API also unavailable - crypto data may be limited")
+
     has_critical = any(r.critical and r.status != "ready" for r in results)
     if has_critical:
         console.print("\n[bold red]Critical check failed - agent cannot start without a working LLM provider.[/bold red]")
         console.print("[dim]  See: agent/.env.example for configuration reference[/dim]")
     else:
-        ready_count = sum(1 for r in results if r.status == "ready")
-        console.print(f"\n[dim]{ready_count}/{len(results)} services ready[/dim]")
+        ready_count = sum(1 for r in display_results if r.status == "ready")
+        console.print(f"\n[dim]{ready_count}/{len(display_results)} services ready[/dim]")
 
     console.print()
     return results

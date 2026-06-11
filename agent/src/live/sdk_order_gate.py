@@ -236,17 +236,43 @@ def _normalize_notional(intent: OrderIntent, connector_module: Any, config: Any)
 
 
 def _quote_price(intent: OrderIntent, connector_module: Any, config: Any) -> float | None:
-    """Live USD price for the intent symbol: connector quote first, loaders next."""
+    """Live USD price for the intent symbol: cache first, connector quote next, loaders last."""
+    # First try our Gate.io cache (fastest and most reliable)
+    try:
+        from src.gate_ws_client import get_cached_ticker
+        
+        # Normalize symbol: BTC/USDT or BTC-USDT -> BTC-USDT
+        symbol = intent.symbol.replace("/", "-").strip()
+        if not symbol.endswith("-USDT") and "USDT" in symbol:
+            symbol = symbol.replace("USDT", "") + "-USDT"
+        
+        ticker = get_cached_ticker(symbol)
+        if ticker:
+            price = float(ticker.get("last", 0))
+            if price > 0:
+                logger.info("[QUOTE-PRICE] ✅ Using Gate.io cache for %s: %.2f", intent.symbol, price)
+                return price
+            logger.debug("[QUOTE-PRICE] Gate.io cache returned zero/negative price for %s", intent.symbol)
+    except Exception as exc:
+        logger.debug("[QUOTE-PRICE] Failed to use Gate.io cache: %s", exc)
+    
+    # Fallback to connector quote
     broker_price = _connector_quote_price(connector_module, config, intent.symbol)
     if broker_price is not None:
+        logger.info("[QUOTE-PRICE] ✅ Using connector quote for %s: %.2f", intent.symbol, broker_price)
         return broker_price
+    
+    # Final fallback to loaders
     asset_class = intent.asset_class or instrument_asset_class(intent.instrument_type)
     if asset_class is None:
+        logger.warning("[QUOTE-PRICE] ❌ No asset class for %s", intent.symbol)
         return None
     try:
-        return last_price_usd(intent.symbol, asset_class)
-    except Exception as exc:  # noqa: BLE001 - loader failure → fail-closed
-        logger.warning("loader quote failed for %s: %s", intent.symbol, exc)
+        price = last_price_usd(intent.symbol, asset_class)
+        logger.info("[QUOTE-PRICE] ✅ Using loader price for %s: %.2f", intent.symbol, price)
+        return price
+    except Exception as exc:
+        logger.warning("[QUOTE-PRICE] ❌ Loader quote failed for %s: %s", intent.symbol, exc)
         return None
 
 
